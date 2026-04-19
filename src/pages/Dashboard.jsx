@@ -1,8 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { LogOut, User, Loader2, Lock, X, Users, BarChart2, ClipboardList } from 'lucide-react'
 import ModuleCard from '../components/ModuleCard'
 import { logActivity } from '../lib/activityLog'
+import { ADMIN_CARD_IMAGES } from '../lib/cardImages'
+
+const BG_IMAGES = [
+  '/images/elevadores/alex_rainer-FJbr9yn05vg-unsplash.jpg',
+  '/images/elevadores/giuseppe-argenziano-TbtSyRLOYzc-unsplash.jpg',
+  '/images/elevadores/zhuojun-yu-s6hM9MgMRsc-unsplash.jpg',
+  '/images/elevadores/zhuojun-yu-s6hM9MgMRsc-unsplash2.jpg',
+]
 
 export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavigateLogs }) {
   const [modules,  setModules]  = useState([])
@@ -10,6 +18,12 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   const [loading,  setLoading]  = useState(true)
   const [blocked,  setBlocked]  = useState(null)  // módulo que o user tentou acessar sem permissão
   const [userPerms, setUserPerms] = useState(null) // null = acesso pleno
+
+  // Imagem de fundo aleatória — sorteada uma vez por visita
+  const bgImage = useMemo(
+    () => BG_IMAGES[Math.floor(Math.random() * BG_IMAGES.length)],
+    []
+  )
 
   useEffect(() => {
     async function load() {
@@ -52,13 +66,16 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
       setBlocked(mod)
       return
     }
-    // Para subsistemas vpsistema.com, injetar SSO token automaticamente
-    if (mod.url && mod.url.includes('vpsistema.com')) {
+    // Para subsistemas vpsistema.com e verticalparts.com, injetar SSO token automaticamente
+    const SSO_DOMAINS = ['vpsistema.com', 'verticalparts.com']
+    if (mod.url && SSO_DOMAINS.some(d => mod.url.includes(d))) {
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        if (session?.access_token) {
+        if (session?.access_token && session?.refresh_token) {
           const target = new URL(mod.url)
-          target.searchParams.set('sso_token', session.access_token)
+          // Injeta access + refresh → subsistema cria sessão SSO via /api/sso
+          target.searchParams.set('sso_token',   session.access_token)
+          target.searchParams.set('sso_refresh', session.refresh_token)
           logActivity({ action: 'module_access', target: mod.name })
           window.open(target.toString(), '_blank', 'noopener')
           return
@@ -77,10 +94,20 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   const avatarUrl = profile?.avatar_url || null
 
   return (
-    <div className="min-h-screen bg-surface flex flex-col">
+    <div
+      className="min-h-screen flex flex-col relative"
+      style={{
+        backgroundImage: `url(${bgImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
+      }}
+    >
+      {/* Overlay escuro sobre o fundo — garante legibilidade */}
+      <div className="absolute inset-0 bg-black/70 pointer-events-none" />
 
       {/* Header */}
-      <header className="bg-surface-card border-b border-surface-border px-6 py-4">
+      <header className="relative z-10 bg-surface-card/80 backdrop-blur-sm border-b border-surface-border px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
 
           <div className="flex items-center gap-3">
@@ -117,7 +144,7 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
       </header>
 
       {/* Conteúdo */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-10">
+      <main className="relative z-10 flex-1 max-w-7xl mx-auto w-full px-6 py-10">
 
         <div className="mb-10">
           <h1 className="text-white text-3xl font-bold mb-1">
@@ -137,23 +164,28 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
             {isAdmin && (
               <button
                 onClick={onNavigateAdmin}
-                className="group relative bg-surface-card border border-surface-border
+                className="group relative overflow-hidden bg-surface-card border border-surface-border
                            hover:border-brand/40 rounded-2xl p-6 text-left
                            transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5
                            focus:outline-none focus:ring-2 focus:ring-brand/50"
               >
-                <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-brand opacity-80 group-hover:opacity-100 transition-opacity" />
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-brand/20 transition-transform group-hover:scale-110">
-                  <Users className="w-6 h-6 text-brand" />
-                </div>
-                <h3 className="text-white font-semibold text-base mb-1 group-hover:text-brand transition-colors">
-                  Administração
-                </h3>
-                <p className="text-slate-500 text-xs leading-relaxed">
-                  Gestão de usuários e acessos
-                </p>
-                <div className="mt-4 flex items-center gap-1 text-xs font-medium text-brand opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span>Gerenciar</span>
+                <div className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                     style={{ backgroundImage: `url(${ADMIN_CARD_IMAGES.administracao})` }} />
+                <div className="absolute inset-0 bg-black/65 group-hover:bg-black/55 transition-colors duration-300" />
+                <div className="relative z-10">
+                  <div className="absolute inset-x-0 -top-6 h-1 bg-brand opacity-80 group-hover:opacity-100 transition-opacity" />
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-brand/25 transition-transform group-hover:scale-110" style={{ boxShadow: '0 0 0 1px #F59E0B30' }}>
+                    <Users className="w-6 h-6 text-brand" />
+                  </div>
+                  <h3 className="text-white font-semibold text-base mb-1 group-hover:text-brand transition-colors">
+                    Administração
+                  </h3>
+                  <p className="text-slate-300 text-xs leading-relaxed opacity-80">
+                    Gestão de usuários e acessos
+                  </p>
+                  <div className="mt-4 flex items-center gap-1 text-xs font-medium text-brand opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Gerenciar</span>
+                  </div>
                 </div>
               </button>
             )}
@@ -161,23 +193,28 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
             {isAdmin && (
               <button
                 onClick={onNavigateCeo}
-                className="group relative bg-surface-card border border-surface-border
+                className="group relative overflow-hidden bg-surface-card border border-surface-border
                            hover:border-green-500/40 rounded-2xl p-6 text-left
                            transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5
                            focus:outline-none focus:ring-2 focus:ring-green-500/50"
               >
-                <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-green-500 opacity-70 group-hover:opacity-100 transition-opacity" />
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-green-500/20 transition-transform group-hover:scale-110">
-                  <BarChart2 className="w-6 h-6 text-green-400" />
-                </div>
-                <h3 className="text-white font-semibold text-base mb-1 group-hover:text-green-400 transition-colors">
-                  Painel Executivo
-                </h3>
-                <p className="text-slate-500 text-xs leading-relaxed">
-                  Visão consolidada de todos os sistemas
-                </p>
-                <div className="mt-4 flex items-center gap-1 text-xs font-medium text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span>Visualizar</span>
+                <div className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                     style={{ backgroundImage: `url(${ADMIN_CARD_IMAGES.painel})` }} />
+                <div className="absolute inset-0 bg-black/65 group-hover:bg-black/55 transition-colors duration-300" />
+                <div className="relative z-10">
+                  <div className="absolute inset-x-0 -top-6 h-1 bg-green-500 opacity-70 group-hover:opacity-100 transition-opacity" />
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-green-500/25 transition-transform group-hover:scale-110" style={{ boxShadow: '0 0 0 1px #10B98130' }}>
+                    <BarChart2 className="w-6 h-6 text-green-400" />
+                  </div>
+                  <h3 className="text-white font-semibold text-base mb-1 group-hover:text-green-400 transition-colors">
+                    Painel Executivo
+                  </h3>
+                  <p className="text-slate-300 text-xs leading-relaxed opacity-80">
+                    Visão consolidada de todos os sistemas
+                  </p>
+                  <div className="mt-4 flex items-center gap-1 text-xs font-medium text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Visualizar</span>
+                  </div>
                 </div>
               </button>
             )}
@@ -185,32 +222,38 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
             {isAdmin && (
               <button
                 onClick={onNavigateLogs}
-                className="group relative bg-surface-card border border-surface-border
+                className="group relative overflow-hidden bg-surface-card border border-surface-border
                            hover:border-sky-500/40 rounded-2xl p-6 text-left
                            transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5
                            focus:outline-none focus:ring-2 focus:ring-sky-500/50"
               >
-                <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-sky-500 opacity-70 group-hover:opacity-100 transition-opacity" />
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-sky-500/20 transition-transform group-hover:scale-110">
-                  <ClipboardList className="w-6 h-6 text-sky-400" />
-                </div>
-                <h3 className="text-white font-semibold text-base mb-1 group-hover:text-sky-400 transition-colors">
-                  Activity Log
-                </h3>
-                <p className="text-slate-500 text-xs leading-relaxed">
-                  Histórico de acessos e ações
-                </p>
-                <div className="mt-4 flex items-center gap-1 text-xs font-medium text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span>Ver histórico</span>
+                <div className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                     style={{ backgroundImage: `url(${ADMIN_CARD_IMAGES.logs})` }} />
+                <div className="absolute inset-0 bg-black/65 group-hover:bg-black/55 transition-colors duration-300" />
+                <div className="relative z-10">
+                  <div className="absolute inset-x-0 -top-6 h-1 bg-sky-500 opacity-70 group-hover:opacity-100 transition-opacity" />
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-sky-500/25 transition-transform group-hover:scale-110" style={{ boxShadow: '0 0 0 1px #0EA5E930' }}>
+                    <ClipboardList className="w-6 h-6 text-sky-400" />
+                  </div>
+                  <h3 className="text-white font-semibold text-base mb-1 group-hover:text-sky-400 transition-colors">
+                    Activity Log
+                  </h3>
+                  <p className="text-slate-300 text-xs leading-relaxed opacity-80">
+                    Histórico de acessos e ações
+                  </p>
+                  <div className="mt-4 flex items-center gap-1 text-xs font-medium text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Ver histórico</span>
+                  </div>
                 </div>
               </button>
             )}
 
             {/* Módulos do sistema */}
-            {modules.map(mod => (
+            {modules.map((mod, i) => (
               <ModuleCard
                 key={mod.slug}
                 module={mod}
+                index={i}
                 locked={!canAccess(mod.slug)}
                 onClick={() => handleModuleClick(mod)}
               />
@@ -220,7 +263,7 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
         )}
       </main>
 
-      <footer className="text-center py-6 text-slate-700 text-xs border-t border-surface-border">
+      <footer className="relative z-10 text-center py-6 text-slate-600 text-xs border-t border-surface-border/50">
         © {new Date().getFullYear()} Vertical Parts — Portal Corporativo
       </footer>
 
