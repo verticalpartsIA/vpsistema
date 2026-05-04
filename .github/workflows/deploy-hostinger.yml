@@ -1,0 +1,87 @@
+name: Deploy Hostinger
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_SB_PROPOSTAS_URL: ${{ secrets.VITE_SB_PROPOSTAS_URL }}
+      VITE_SB_PROPOSTAS_KEY: ${{ secrets.VITE_SB_PROPOSTAS_KEY }}
+      VITE_SB_CLICK_URL: ${{ secrets.VITE_SB_CLICK_URL }}
+      VITE_SB_CLICK_KEY: ${{ secrets.VITE_SB_CLICK_KEY }}
+      VITE_SB_VISITAS_URL: ${{ secrets.VITE_SB_VISITAS_URL }}
+      VITE_SB_VISITAS_KEY: ${{ secrets.VITE_SB_VISITAS_KEY }}
+      VITE_SB_CATRACA_URL: ${{ secrets.VITE_SB_CATRACA_URL }}
+      VITE_SB_CATRACA_KEY: ${{ secrets.VITE_SB_CATRACA_KEY }}
+      NODE_ENV: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build production bundle
+        run: npm run build
+
+      - name: Prepare deploy package
+        run: |
+          mkdir -p deploy
+          cp -R dist deploy/dist
+          cp package.json deploy/package.json
+          cp package-lock.json deploy/package-lock.json
+
+      - name: Upload deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hostinger-deploy-package
+          path: deploy
+
+      - name: Resolve deploy flags
+        id: flags
+        run: |
+          echo "has_ftp=${{ secrets.HOSTINGER_FTP_SERVER != '' }}" >> "$GITHUB_OUTPUT"
+          echo "has_ssh=${{ secrets.HOSTINGER_SSH_HOST != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy files over FTP
+        if: steps.flags.outputs.has_ftp == 'true'
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.HOSTINGER_FTP_SERVER }}
+          username: ${{ secrets.HOSTINGER_FTP_USERNAME }}
+          password: ${{ secrets.HOSTINGER_FTP_PASSWORD }}
+          local-dir: deploy/
+          server-dir: ${{ secrets.HOSTINGER_FTP_REMOTE_DIR }}
+          dangerous-clean-slate: false
+
+      - name: Install production dependencies over SSH
+        if: steps.flags.outputs.has_ssh == 'true'
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.HOSTINGER_SSH_HOST }}
+          username: ${{ secrets.HOSTINGER_SSH_USERNAME }}
+          key: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT || '22' }}
+          script: |
+            set -eu
+            cd "${{ secrets.HOSTINGER_APP_DIR }}"
+            npm install --omit=dev
+            if [ -n "${{ secrets.HOSTINGER_RESTART_COMMAND }}" ]; then
+              eval "${{ secrets.HOSTINGER_RESTART_COMMAND }}"
+            fi
