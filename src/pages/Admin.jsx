@@ -20,7 +20,7 @@ export default function Admin({ onBack }) {
 
   // Modal convite
   const [showInvite, setShowInvite] = useState(false)
-  const [invite,     setInvite]     = useState({ name: '', email: '', department: '', level: 'Colaborador' })
+  const [invite,     setInvite]     = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
   const [inviting,   setInviting]   = useState(false)
   const [inviteMsg,  setInviteMsg]  = useState(null)
 
@@ -195,15 +195,18 @@ export default function Admin({ onBack }) {
         name:       invite.name,
         level:      invite.level,
         department: invite.department || null,
+        password:   invite.password,
       }
     })
 
     if (error || data?.error) {
-      setInviteMsg({ type: 'error', text: error?.message || data?.error || 'Erro ao enviar convite.' })
+      setInviteMsg({ type: 'error', text: error?.message || data?.error || 'Erro ao criar usuário.' })
     } else {
-      setInviteMsg({ type: 'success', text: `Convite enviado para ${invite.email}!` })
+      const ok = data?.platforms?.filter(p => p.status === 'ok').map(p => p.platform) || []
+      const extra = ok.length > 0 ? ` Também criado em: ${ok.join(', ')}.` : ''
+      setInviteMsg({ type: 'success', text: `Usuário ${invite.email} criado com sucesso!${extra}` })
       logActivity({ action: 'invite_user', target: invite.email, details: { nome: invite.name, nivel: invite.level } })
-      setInvite({ name: '', email: '', department: '', level: 'Colaborador' })
+      setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
       loadAll()
     }
     setInviting(false)
@@ -679,6 +682,25 @@ export default function Admin({ onBack }) {
                     {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                  Senha temporária
+                </label>
+                <input
+                  type="password"
+                  value={invite.password}
+                  onChange={e => setInvite(p => ({ ...p, password: e.target.value }))}
+                  placeholder="Mínimo 6 caracteres"
+                  required
+                  minLength={6}
+                  className="w-full bg-surface border border-surface-border text-white placeholder-slate-600
+                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                />
+                <p className="text-slate-500 text-xs mt-1">
+                  O colaborador poderá trocar via "Esqueci minha senha" após o primeiro acesso.
+                </p>
               </div>
 
               {inviteMsg && (

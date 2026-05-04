@@ -5,13 +5,43 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Plataformas que receberão o novo usuário automaticamente
+// As chaves são configuradas como secrets no painel Supabase → Edge Functions → Secrets
+const PLATFORMS = [
+  {
+    name: 'VP Requisições',
+    url:  Deno.env.get('SB_VPREQUISICAO_URL'),
+    key:  Deno.env.get('SB_VPREQUISICAO_SERVICE_KEY'),
+  },
+  {
+    name: 'Pós-Venda 360',
+    url:  Deno.env.get('SB_POSVENDA360_URL'),
+    key:  Deno.env.get('SB_POSVENDA360_SERVICE_KEY'),
+  },
+  {
+    name: 'Propostas',
+    url:  Deno.env.get('SB_PROPOSTAS_URL'),
+    key:  Deno.env.get('SB_PROPOSTAS_SERVICE_KEY'),
+  },
+  {
+    name: 'Visitas e Brindes',
+    url:  Deno.env.get('SB_VISITAS_URL'),
+    key:  Deno.env.get('SB_VISITAS_SERVICE_KEY'),
+  },
+  {
+    name: 'VP Catraca',
+    url:  Deno.env.get('SB_CATRACA_URL'),
+    key:  Deno.env.get('SB_CATRACA_SERVICE_KEY'),
+  },
+]
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // Verifica que quem chamou é um Administrador
+    // ── Verifica autenticação ──
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'Não autorizado' }), {
@@ -32,7 +62,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Confirma que o usuário é Administrador
+    // ── Confirma que o chamador é Administrador ──
     const { data: profile } = await supabaseUser
       .from('profiles')
       .select('level')
@@ -45,25 +75,65 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Executa o convite com service role
+    const { email, name, level, department, password } = await req.json()
+
+    if (!password || password.length < 6) {
+      return new Response(JSON.stringify({ error: 'A senha temporária deve ter pelo menos 6 caracteres.' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
+    // ── Admin client do vpsistema (plataforma principal) ──
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { email, name, level, department } = await req.json()
-
-    const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-      data: { name, level: level || 'Colaborador', department: department || null }
+    // 1. Cria o usuário no vpsistema com senha definida pelo admin
+    const { data: mainData, error: mainError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { name, level: level || 'Colaborador', department: department || null }
     })
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
+    if (mainError) {
+      return new Response(JSON.stringify({ error: mainError.message }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    return new Response(JSON.stringify({ user: data.user }), {
+    // 2. Replica o usuário em todas as outras plataformas
+    const platformResults: { platform: string; status: string; error?: string }[] = []
+
+    for (const platform of PLATFORMS) {
+      if (!platform.url || !platform.key) {
+        platformResults.push({ platform: platform.name, status: 'skipped' })
+        continue
+      }
+
+      try {
+        const adminClient = createClient(platform.url, platform.key)
+        const { error } = await adminClient.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: { name, department: department || null }
+        })
+        platformResults.push({
+          platform: platform.name,
+          status: error ? 'error' : 'ok',
+          error: error?.message
+        })
+      } catch (e) {
+        platformResults.push({ platform: platform.name, status: 'error', error: String(e) })
+      }
+    }
+
+    return new Response(JSON.stringify({
+      user: mainData.user,
+      platforms: platformResults
+    }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
 
