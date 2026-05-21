@@ -11,14 +11,14 @@ export default function ModuleCard({ module: mod, locked = false, onClick, index
     <button
       onClick={onClick}
       className={`group relative overflow-hidden bg-surface-card border border-surface-border rounded-2xl p-6 text-left
-                  transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand/50
+                  transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-brand/50
                   ${locked
                     ? 'opacity-35 saturate-50 cursor-pointer'
-                    : 'hover:border-opacity-60 hover:shadow-xl hover:-translate-y-0.5'}`}
+                    : 'hover:border-brand/40 hover:shadow-2xl hover:-translate-y-2 hover:scale-[1.02]'}`}
     >
       {/* Imagem de fundo opaca */}
       <div
-        className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+        className="absolute inset-0 bg-cover bg-center transition-transform duration-300 group-hover:scale-110"
         style={{ backgroundImage: `url(${bgImage})` }}
       />
       {/* Overlay escuro para garantir legibilidade */}

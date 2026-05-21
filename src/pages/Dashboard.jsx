@@ -1,16 +1,10 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { LogOut, User, Loader2, Lock, X, Users, BarChart2, ClipboardList } from 'lucide-react'
 import ModuleCard from '../components/ModuleCard'
 import { logActivity } from '../lib/activityLog'
 import { ADMIN_CARD_IMAGES } from '../lib/cardImages'
 
-const BG_IMAGES = [
-  '/images/elevadores/alex_rainer-FJbr9yn05vg-unsplash.jpg',
-  '/images/elevadores/giuseppe-argenziano-TbtSyRLOYzc-unsplash.jpg',
-  '/images/elevadores/zhuojun-yu-s6hM9MgMRsc-unsplash.jpg',
-  '/images/elevadores/zhuojun-yu-s6hM9MgMRsc-unsplash2.jpg',
-]
 
 export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavigateLogs }) {
   const [modules,  setModules]  = useState([])
@@ -18,12 +12,6 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   const [loading,  setLoading]  = useState(true)
   const [blocked,  setBlocked]  = useState(null)  // módulo que o user tentou acessar sem permissão
   const [userPerms, setUserPerms] = useState(null) // null = acesso pleno
-
-  // Imagem de fundo aleatória — sorteada uma vez por visita
-  const bgImage = useMemo(
-    () => BG_IMAGES[Math.floor(Math.random() * BG_IMAGES.length)],
-    []
-  )
 
   useEffect(() => {
     async function load() {
@@ -94,37 +82,27 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   const avatarUrl = profile?.avatar_url || null
 
   return (
-    <div
-      className="min-h-screen flex flex-col relative"
-      style={{
-        backgroundImage: `url(${bgImage})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed',
-      }}
-    >
-      {/* Overlay escuro sobre o fundo — garante legibilidade */}
-      <div className="absolute inset-0 bg-black/70 pointer-events-none" />
+    <div className="min-h-screen flex flex-col bg-neutral-50">
 
       {/* Header */}
-      <header className="relative z-10 bg-surface-card/80 backdrop-blur-sm border-b border-surface-border px-6 py-4">
+      <header className="bg-white border-b border-neutral-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
 
           <div className="flex items-center gap-3">
-            <img src="/vp-logo.png" alt="VerticalParts" className="h-8 w-8 rounded-lg object-cover" />
-            <span className="text-white font-bold text-lg tracking-wide">VerticalParts</span>
+            <img src="/logo-color.png" alt="VerticalParts" className="h-8 object-contain" />
+            <span className="text-neutral-900 font-bold text-lg tracking-wide">VerticalParts</span>
           </div>
 
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-slate-300">
+            <div className="flex items-center gap-2 text-neutral-600">
               <div className="w-8 h-8 rounded-full bg-brand/20 flex items-center justify-center ring-2 ring-brand/30">
                 <span className="text-brand font-bold text-xs">
                   {(profile?.name || user.email).slice(0, 2).toUpperCase()}
                 </span>
               </div>
               <div className="hidden sm:block">
-                <p className="text-sm font-medium text-white leading-none">{profile?.name || user.email}</p>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p className="text-sm font-medium text-neutral-900 leading-none">{profile?.name || user.email}</p>
+                <p className="text-xs text-neutral-500 mt-0.5">
                   {profile?.level || 'Colaborador'}
                   {profile?.department ? ` · ${profile.department}` : ''}
                 </p>
@@ -132,8 +110,8 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 text-slate-400 hover:text-red-400
-                         border border-surface-border hover:border-red-500/40
+              className="flex items-center gap-2 text-neutral-500 hover:text-red-500
+                         border border-neutral-200 hover:border-red-300
                          rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -144,13 +122,13 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
       </header>
 
       {/* Conteúdo */}
-      <main className="relative z-10 flex-1 max-w-7xl mx-auto w-full px-6 py-10">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-10">
 
         <div className="mb-10">
-          <h1 className="text-white text-3xl font-bold mb-1">
+          <h1 className="text-neutral-900 text-3xl font-bold mb-1">
             Olá, <span className="text-brand">{firstName}</span> 👋
           </h1>
-          <p className="text-slate-400">Selecione o sistema que deseja acessar</p>
+          <p className="text-neutral-500">Selecione o sistema que deseja acessar</p>
         </div>
 
         {loading ? (
@@ -263,7 +241,7 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
         )}
       </main>
 
-      <footer className="relative z-10 text-center py-6 text-slate-600 text-xs border-t border-surface-border/50">
+      <footer className="text-center py-6 text-neutral-400 text-xs border-t border-neutral-200">
         © {new Date().getFullYear()} Vertical Parts — Portal Corporativo
       </footer>
 
