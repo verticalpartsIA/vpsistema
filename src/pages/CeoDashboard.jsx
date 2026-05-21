@@ -6,18 +6,12 @@ import {
   CheckSquare, AlertTriangle, DollarSign, BarChart2
 } from 'lucide-react'
 
-const sbPropostas = createClient(
-  import.meta.env.VITE_SB_PROPOSTAS_URL,
-  import.meta.env.VITE_SB_PROPOSTAS_KEY
-)
-const sbClick = createClient(
-  import.meta.env.VITE_SB_CLICK_URL,
-  import.meta.env.VITE_SB_CLICK_KEY
-)
-const sbVisitas = createClient(
-  import.meta.env.VITE_SB_VISITAS_URL,
-  import.meta.env.VITE_SB_VISITAS_KEY
-)
+const mkClient = (url, key) =>
+  url && key ? createClient(url, key) : null
+
+const sbPropostas = mkClient(import.meta.env.VITE_SB_PROPOSTAS_URL, import.meta.env.VITE_SB_PROPOSTAS_KEY)
+const sbClick     = mkClient(import.meta.env.VITE_SB_CLICK_URL,     import.meta.env.VITE_SB_CLICK_KEY)
+const sbVisitas   = mkClient(import.meta.env.VITE_SB_VISITAS_URL,   import.meta.env.VITE_SB_VISITAS_KEY)
 
 function fmt(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(value || 0)
