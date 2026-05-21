@@ -6,41 +6,52 @@ const CORS = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const APPS: Record<string, { url: string; serviceKeyEnv: string; redirectTo: string }> = {
+type MagicLinkApp = {
+  ssoType: 'magiclink'
+  url: string
+  serviceKeyEnv: string
+  redirectTo: string
+}
+
+type TokenApp = {
+  ssoType: 'token'
+  redirectTo: string
+}
+
+type AppConfig = MagicLinkApp | TokenApp
+
+const APPS: Record<string, AppConfig> = {
+  // Apps com Supabase Auth próprio → magic link
   vprequisicoes: {
+    ssoType: 'magiclink',
     url: 'https://vvgcrhtmzvssfdazkkzk.supabase.co',
     serviceKeyEnv: 'VPREQ_SERVICE_KEY',
     redirectTo: 'https://vprequisicoes.vpsistema.com',
   },
   posvenda360: {
+    ssoType: 'magiclink',
     url: 'https://jkbklzlbhhfnamaeislb.supabase.co',
     serviceKeyEnv: 'PV360_SERVICE_KEY',
     redirectTo: 'https://posvenda360.vpsistema.com',
   },
-  vpclick: {
-    url: 'https://sfpnjwllcmentoocylow.supabase.co',
-    serviceKeyEnv: 'VPCLICK_SERVICE_KEY',
-    redirectTo: 'https://vpclick.vpsistema.com',
-  },
-  propostas: {
-    url: 'https://wfwraicrwazjblyvtzfu.supabase.co',
-    serviceKeyEnv: 'PROPOSTAS_SERVICE_KEY',
-    redirectTo: 'https://propostas.vpsistema.com',
-  },
   visitas: {
+    ssoType: 'magiclink',
     url: 'https://bvvnoapdclxhuygptbza.supabase.co',
     serviceKeyEnv: 'VISITAS_SERVICE_KEY',
     redirectTo: 'https://visitas.vpsistema.com',
   },
+  // Apps que validam o JWT do vpsistema via ?sso_token=
+  vpclick: {
+    ssoType: 'token',
+    redirectTo: 'https://vpclick.vpsistema.com',
+  },
   catraca: {
-    url: 'https://ipqtbqstasirxlcoapns.supabase.co',
-    serviceKeyEnv: 'CATRACA_SERVICE_KEY',
+    ssoType: 'token',
     redirectTo: 'https://catraca.vpsistema.com',
   },
-  'cotacao-importacao': {
-    url: 'https://jbwgjegelhoueygcvafq.supabase.co',
-    serviceKeyEnv: 'COTACAO_SERVICE_KEY',
-    redirectTo: 'https://cotacao-importacao.vpsistema.com',
+  propostas: {
+    ssoType: 'token',
+    redirectTo: 'https://propostas.vpsistema.com',
   },
 }
 
@@ -66,6 +77,13 @@ serve(async (req: Request) => {
     const app = APPS[targetApp]
     if (!app) return json({ error: 'Unknown app' }, 400)
 
+    // Token-based SSO: pass vpsistema JWT directly as ?sso_token=
+    if (app.ssoType === 'token') {
+      const token = authHeader.replace('Bearer ', '')
+      return json({ actionLink: `${app.redirectTo}?sso_token=${encodeURIComponent(token)}` })
+    }
+
+    // Magic link SSO: generate Supabase Auth link for the target app
     const serviceKey = Deno.env.get(app.serviceKeyEnv)
     if (!serviceKey) return json({ error: 'App not configured' }, 500)
 
