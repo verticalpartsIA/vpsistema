@@ -7,4 +7,5 @@ dist-ssr
 .DS_Store
 *.tar.gz
 *.zip
-.claude
+# .claude é versionado intencionalmente (contém documentação do projeto)
+# .claude/settings.json    ← adicione aqui se quiser ignorar arquivos internos do Claude
