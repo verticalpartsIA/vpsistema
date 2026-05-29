@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { email, name, level, department, password } = await req.json()
+    const { email, name, level, department, password, avatar_url } = await req.json()
 
     if (!password || password.length < 6) {
       return new Response(JSON.stringify({ error: 'A senha temporária deve ter pelo menos 6 caracteres.' }), {
@@ -101,6 +101,14 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: mainError.message }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
+    }
+
+    // 1b. Salva avatar_url no profile (service role bypassa RLS)
+    if (avatar_url && mainData.user?.id) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ avatar_url })
+        .eq('id', mainData.user.id)
     }
 
     // 2. Replica o usuário em todas as outras plataformas

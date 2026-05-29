@@ -7,8 +7,13 @@ import {
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
-const DEPARTMENTS = ['Compras', 'Engenharia', 'Financeiro', 'Logistica', 'MKT', 'Vendas']
-const LEVELS      = ['Administrador', 'Lider', 'Colaborador']
+const DEPARTMENTS = [
+  'Administrativo', 'Almoxarifado', 'Comercial', 'Compras',
+  'Engenharia', 'Financeiro', 'Juridico', 'Logistica',
+  'MKT', 'Montagem', 'Operacoes', 'PCP',
+  'Producao', 'Qualidade', 'RH', 'Vendas',
+]
+const LEVELS = ['Administrador', 'Lider', 'Colaborador']
 
 export default function Admin({ onBack }) {
   const [users,    setUsers]   = useState([])
@@ -34,6 +39,11 @@ export default function Admin({ onBack }) {
   const [permLoading,   setPermLoading]   = useState(false)
   const [permSaving,    setPermSaving]    = useState(false)
   const [permMsg,       setPermMsg]       = useState(null)
+
+  // Modal exclusão
+  const [deleteUser,    setDeleteUser]    = useState(null)
+  const [deleting,      setDeleting]      = useState(false)
+  const [deleteMsg,     setDeleteMsg]     = useState(null)
 
   // Feedback inline
   const [actionMsg, setActionMsg] = useState(null)
@@ -204,6 +214,20 @@ export default function Admin({ onBack }) {
     setInviting(true)
     setInviteMsg(null)
 
+    // Upload avatar ANTES da edge function (service role fará o update do profile)
+    let avatarUrl = null
+    if (avatarFile) {
+      const ext  = avatarFile.name.split('.').pop() || 'jpg'
+      const tempPath = `pending/${Date.now()}.${ext}`
+      const { error: uploadErr } = await supabase.storage
+        .from('avatars')
+        .upload(tempPath, avatarFile, { upsert: true, contentType: avatarFile.type })
+      if (!uploadErr) {
+        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(tempPath)
+        avatarUrl = publicUrl
+      }
+    }
+
     const { data, error } = await supabase.functions.invoke('invite-user', {
       body: {
         email:      invite.email,
@@ -211,6 +235,7 @@ export default function Admin({ onBack }) {
         level:      invite.level,
         department: invite.department || null,
         password:   invite.password,
+        avatar_url: avatarUrl,
       }
     })
 
@@ -220,20 +245,15 @@ export default function Admin({ onBack }) {
       return
     }
 
-    // Upload de avatar se o admin escolheu uma foto
-    if (avatarFile && data?.user?.id) {
+    // Renomear o arquivo do avatar para o userId definitivo
+    if (avatarUrl && data?.user?.id) {
       const userId = data.user.id
       const ext    = avatarFile.name.split('.').pop() || 'jpg'
-      const path   = `${userId}.${ext}`
-
-      const { error: uploadErr } = await supabase.storage
-        .from('avatars')
-        .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type })
-
-      if (!uploadErr) {
-        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
-        await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', userId)
-      }
+      const finalPath = `${userId}.${ext}`
+      const tempPath  = avatarUrl.split('/avatars/')[1]
+      await supabase.storage.from('avatars').move(tempPath, finalPath)
+      const { data: { publicUrl: finalUrl } } = supabase.storage.from('avatars').getPublicUrl(finalPath)
+      await supabase.from('profiles').update({ avatar_url: finalUrl }).eq('id', userId)
     }
 
     const ok = data?.platforms?.filter(p => p.status === 'ok').map(p => p.platform) || []
@@ -243,6 +263,26 @@ export default function Admin({ onBack }) {
     resetInviteModal()
     loadAll()
     setInviting(false)
+  }
+
+  async function handleDelete() {
+    if (!deleteUser) return
+    setDeleting(true)
+    setDeleteMsg(null)
+    const { data, error } = await supabase.functions.invoke('delete-user', {
+      body: { user_id: deleteUser.id, email: deleteUser.email }
+    })
+    if (error || data?.error) {
+      setDeleteMsg({ type: 'error', text: error?.message || data?.error || 'Erro ao excluir.' })
+      setDeleting(false)
+      return
+    }
+    logActivity({ action: 'delete_user', target: deleteUser.email })
+    setUsers(prev => prev.filter(u => u.id !== deleteUser.id))
+    setDeleteUser(null)
+    setDeleting(false)
+    setActionMsg({ type: 'success', text: `${deleteUser.name || deleteUser.email} foi excluído de todos os sistemas.` })
+    setTimeout(() => setActionMsg(null), 4000)
   }
 
   const filtered = users.filter(u => {
@@ -484,6 +524,14 @@ export default function Admin({ onBack }) {
                           >
                             {u.is_active ? 'Inativar' : 'Reativar'}
                           </button>
+                          <button
+                            onClick={() => { setDeleteUser(u); setDeleteMsg(null) }}
+                            className="text-xs font-medium px-3 py-1.5 rounded-lg border
+                                       border-red-700/40 text-red-500 hover:bg-red-700/15 transition-colors"
+                            title="Excluir permanentemente de todos os sistemas"
+                          >
+                            Excluir
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -637,6 +685,52 @@ export default function Admin({ onBack }) {
 
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Confirmar Exclusão ── */}
+      {deleteUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-surface-card border border-red-700/40 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+            <div className="flex flex-col items-center text-center gap-4">
+              <div className="w-14 h-14 rounded-full bg-red-500/15 flex items-center justify-center">
+                <XCircle className="w-7 h-7 text-red-500" />
+              </div>
+              <div>
+                <h2 className="text-white font-bold text-lg">Excluir colaborador?</h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  <span className="text-white font-semibold">{deleteUser.name || deleteUser.email}</span> será
+                  removido permanentemente de <span className="text-red-400 font-semibold">todos os sistemas VP</span>.
+                  Esta ação não pode ser desfeita.
+                </p>
+              </div>
+              {deleteMsg && (
+                <div className="w-full flex items-center gap-2 rounded-lg px-4 py-3 text-sm bg-red-500/10 border border-red-500/30 text-red-400">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  {deleteMsg.text}
+                </div>
+              )}
+              <div className="flex gap-3 w-full mt-2">
+                <button
+                  onClick={() => { setDeleteUser(null); setDeleteMsg(null) }}
+                  disabled={deleting}
+                  className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border
+                             text-slate-400 hover:text-white hover:border-slate-500 transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg
+                             bg-red-600 hover:bg-red-700 text-white transition-colors
+                             flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {deleting ? <><Loader2 className="w-4 h-4 animate-spin" /> Excluindo...</> : 'Excluir'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
