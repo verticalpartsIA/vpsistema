@@ -24,7 +24,7 @@ function App() {
       setLoading(false)
       return
     }
-    if (hash.includes('type=invite')) {
+    if (hash.includes('type=invite') || hash.includes('type=recovery')) {
       setIsRecovery(true) // reutiliza o mesmo fluxo de definir senha
     }
 

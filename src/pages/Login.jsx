@@ -84,7 +84,7 @@ function Field({ label, type = 'text', value, onChange, placeholder, required, i
                      focus:border-brand focus:ring-2 focus:ring-brand/20"
         />
         {rightSlot && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2">{rightSlot}</span>
+          <span className="absolute right-3 top-1/2 z-10 -translate-y-1/2">{rightSlot}</span>
         )}
       </div>
     </div>
@@ -164,7 +164,7 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
 
   const EyeBtn = ({ show, onToggle }) => (
     <button type="button" onClick={onToggle} tabIndex={-1}
-      className="text-neutral-400 hover:text-neutral-600 transition-colors">
+      className="cursor-pointer text-neutral-400 hover:text-neutral-600 transition-colors">
       {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
     </button>
   )
