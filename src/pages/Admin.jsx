@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { logActivity } from '../lib/activityLog'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
-  CheckCircle, XCircle, User, X, Send, Shield, Globe
+  CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
@@ -19,10 +19,12 @@ export default function Admin({ onBack }) {
   const [filterStatus, setFilterStatus] = useState('')
 
   // Modal convite
-  const [showInvite, setShowInvite] = useState(false)
-  const [invite,     setInvite]     = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
-  const [inviting,   setInviting]   = useState(false)
-  const [inviteMsg,  setInviteMsg]  = useState(null)
+  const [showInvite,    setShowInvite]    = useState(false)
+  const [invite,        setInvite]        = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
+  const [inviting,      setInviting]      = useState(false)
+  const [inviteMsg,     setInviteMsg]     = useState(null)
+  const [avatarFile,    setAvatarFile]    = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState(null)
 
   // Modal permissões
   const [permUser,      setPermUser]      = useState(null)   // usuário sendo editado
@@ -184,6 +186,19 @@ export default function Admin({ onBack }) {
     }, 1500)
   }
 
+  function handleAvatarChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarFile(file)
+    setAvatarPreview(URL.createObjectURL(file))
+  }
+
+  function resetInviteModal() {
+    setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
+    setAvatarFile(null)
+    if (avatarPreview) { URL.revokeObjectURL(avatarPreview); setAvatarPreview(null) }
+  }
+
   async function handleInvite(e) {
     e.preventDefault()
     setInviting(true)
@@ -201,14 +216,32 @@ export default function Admin({ onBack }) {
 
     if (error || data?.error) {
       setInviteMsg({ type: 'error', text: error?.message || data?.error || 'Erro ao criar usuário.' })
-    } else {
-      const ok = data?.platforms?.filter(p => p.status === 'ok').map(p => p.platform) || []
-      const extra = ok.length > 0 ? ` Também criado em: ${ok.join(', ')}.` : ''
-      setInviteMsg({ type: 'success', text: `Usuário ${invite.email} criado com sucesso!${extra}` })
-      logActivity({ action: 'invite_user', target: invite.email, details: { nome: invite.name, nivel: invite.level } })
-      setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
-      loadAll()
+      setInviting(false)
+      return
     }
+
+    // Upload de avatar se o admin escolheu uma foto
+    if (avatarFile && data?.user?.id) {
+      const userId = data.user.id
+      const ext    = avatarFile.name.split('.').pop() || 'jpg'
+      const path   = `${userId}.${ext}`
+
+      const { error: uploadErr } = await supabase.storage
+        .from('avatars')
+        .upload(path, avatarFile, { upsert: true, contentType: avatarFile.type })
+
+      if (!uploadErr) {
+        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+        await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', userId)
+      }
+    }
+
+    const ok = data?.platforms?.filter(p => p.status === 'ok').map(p => p.platform) || []
+    const extra = ok.length > 0 ? ` Também criado em: ${ok.join(', ')}.` : ''
+    setInviteMsg({ type: 'success', text: `Usuário ${invite.email} criado com sucesso!${extra}` })
+    logActivity({ action: 'invite_user', target: invite.email, details: { nome: invite.name, nivel: invite.level } })
+    resetInviteModal()
+    loadAll()
     setInviting(false)
   }
 
@@ -251,7 +284,7 @@ export default function Admin({ onBack }) {
           </div>
 
           <button
-            onClick={() => { setShowInvite(true); setInviteMsg(null) }}
+            onClick={() => { setShowInvite(true); setInviteMsg(null); resetInviteModal() }}
             className="flex items-center gap-2 bg-brand hover:bg-brand-dark text-surface
                        font-bold rounded-lg px-4 py-2 text-sm transition-colors shadow-md shadow-brand/20"
           >
@@ -615,13 +648,44 @@ export default function Admin({ onBack }) {
 
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-white font-bold text-lg">Convidar Colaborador</h2>
-              <button onClick={() => setShowInvite(false)}
+              <button type="button" onClick={() => { setShowInvite(false); resetInviteModal(); setInviteMsg(null) }}
                       className="text-slate-500 hover:text-white transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleInvite} className="space-y-4">
+
+              {/* Avatar picker */}
+              <div className="flex flex-col items-center gap-2 pb-2">
+                <label className="cursor-pointer group relative">
+                  <div className="w-20 h-20 rounded-full border-2 border-dashed border-surface-border
+                                  group-hover:border-brand transition-colors overflow-hidden
+                                  flex items-center justify-center bg-surface">
+                    {avatarPreview ? (
+                      <img src={avatarPreview} alt="avatar" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-1 text-slate-500 group-hover:text-brand transition-colors">
+                        <Camera className="w-6 h-6" />
+                        <span className="text-[10px] font-semibold uppercase tracking-wider">Foto</span>
+                      </div>
+                    )}
+                  </div>
+                  {avatarPreview && (
+                    <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100
+                                    transition-opacity flex items-center justify-center">
+                      <Camera className="w-5 h-5 text-white" />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={handleAvatarChange}
+                    className="sr-only"
+                  />
+                </label>
+                <span className="text-slate-500 text-xs">Foto do colaborador (opcional)</span>
+              </div>
 
               <div>
                 <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
