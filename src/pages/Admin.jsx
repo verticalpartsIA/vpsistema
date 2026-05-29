@@ -299,23 +299,33 @@ export default function Admin({ onBack }) {
       .from('avatars')
       .upload(path, file, { upsert: true, contentType: file.type })
 
-    if (!uploadErr) {
-      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
-      const { error: updateErr } = await supabase
-        .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', userId)
-
-      if (!updateErr) {
-        setUsers(prev => prev.map(u => u.id === userId ? { ...u, avatar_url: publicUrl } : u))
-        setActionMsg({ type: 'success', text: 'Avatar atualizado com sucesso!' })
-        setTimeout(() => setActionMsg(null), 3000)
-      } else {
-        setActionMsg({ type: 'error', text: 'Erro ao salvar o avatar.' })
-        setTimeout(() => setActionMsg(null), 3000)
-      }
+    if (uploadErr) {
+      console.error('Avatar upload error:', uploadErr)
+      setActionMsg({ type: 'error', text: `Erro no upload: ${uploadErr.message}` })
+      setTimeout(() => setActionMsg(null), 4000)
+      setAvatarUploading(prev => ({ ...prev, [userId]: false }))
+      return
     }
 
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+
+    // Força cache-bust para o img atualizar imediatamente
+    const urlWithBust = `${publicUrl}?t=${Date.now()}`
+
+    const { error: updateErr } = await supabase
+      .from('profiles')
+      .update({ avatar_url: publicUrl })
+      .eq('id', userId)
+
+    if (updateErr) {
+      console.error('Profile update error:', updateErr)
+      setActionMsg({ type: 'error', text: `Erro ao salvar perfil: ${updateErr.message}` })
+    } else {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, avatar_url: urlWithBust } : u))
+      setActionMsg({ type: 'success', text: 'Avatar atualizado com sucesso!' })
+    }
+
+    setTimeout(() => setActionMsg(null), 3500)
     setAvatarUploading(prev => ({ ...prev, [userId]: false }))
   }
 
