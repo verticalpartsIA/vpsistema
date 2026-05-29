@@ -118,4 +118,43 @@ Usuário define nova senha → logado e redirecionado ao Dashboard
 
 ---
 
+---
+
+## Correções adicionais (rodada 2 — 29/05/2026)
+
+### 4. Logo nos templates de e-mail — URL confiável via Supabase Storage
+
+**Problema:** A URL `https://vpsistema.com/logo-white.png` não carregava no preview do Supabase e pode ser bloqueada por clientes de e-mail (Outlook, Gmail) que restringem imagens de domínios desconhecidos.
+
+**Solução:**
+- Upload do `logo-white.png` para o bucket `avatars` em `brand/logo-white.png`
+- URL pública via Supabase CDN: `https://ubdkoqxfwcraftesgmbw.supabase.co/storage/v1/object/public/avatars/brand/logo-white.png`
+- Esta URL é servida pelo CDN do Supabase, sempre disponível e com Content-Type correto (`image/png`, 68 KB)
+- Todos os 3 templates foram atualizados para usar esta URL
+
+### 5. Sender name corrigido
+
+| Campo | Antes | Depois |
+|-------|-------|--------|
+| `smtp_sender_name` | `vpsistema` | `VerticalParts` |
+
+O e-mail chega no Outlook com **"De: VerticalParts"** em vez de "vpsistema".
+
+### 6. Melhorias gerais nos templates
+
+- Adicionado `<meta name="color-scheme" content="light">` para forçar tema claro em Outlook/iOS Mail
+- Adicionado `bgcolor` nos `<table>` para compatibilidade Outlook (que ignora CSS `background`)
+- Link de contato `suporte@vpsistema.com` adicionado no rodapé de cada template
+- Logo com link clicável apontando para `https://vpsistema.com`
+
+### Estado final dos templates (via Supabase Management API)
+
+| Template | Assunto | Logo | Sender |
+|----------|---------|------|--------|
+| Confirmação | "Confirme seu acesso — VerticalParts" | Storage CDN ✅ | VerticalParts ✅ |
+| Recuperação | "Redefina sua senha — VerticalParts" | Storage CDN ✅ | VerticalParts ✅ |
+| Convite | "Bem-vindo ao Portal VerticalParts — Crie sua senha" | Storage CDN ✅ | VerticalParts ✅ |
+
+---
+
 *Gerado em 29/05/2026 — Claude Sonnet 4.6*
