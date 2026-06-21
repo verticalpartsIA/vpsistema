@@ -32,8 +32,7 @@ function KpiCard({ icon: Icon, label, value, sub, color = 'brand' }) {
         <Icon className="w-5 h-5" />
       </div>
       <p className="text-white text-2xl font-bold leading-none">{value}</p>
-      {sub && <p className="text-xs font-medium mt-0.5" style={{ color: 'inherit' }}
-        className={`text-xs font-medium mt-0.5 ${colors[color].split(' ')[0]}`}>{sub}</p>}
+      {sub && <p className={`text-xs font-medium mt-0.5 ${colors[color].split(' ')[0]}`}>{sub}</p>}
       <p className="text-slate-500 text-xs mt-1">{label}</p>
     </div>
   )
