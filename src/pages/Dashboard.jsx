@@ -54,23 +54,50 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
       setBlocked(mod)
       return
     }
-    // SSO via edge function para subdomínios de vpsistema.com / verticalparts.com
-    const SSO_DOMAINS = ['vpsistema.com', 'verticalparts.com']
-    if (mod.url && SSO_DOMAINS.some(d => mod.url.includes(d))) {
-      try {
-        const targetApp = new URL(mod.url).hostname.split('.')[0]
-        const { data, error } = await supabase.functions.invoke('sso-proxy', {
-          body: { targetApp },
-        })
-        if (!error && data?.actionLink) {
-          logActivity({ action: 'module_access', target: mod.name })
-          window.open(data.actionLink, '_blank', 'noopener')
-          return
-        }
-      } catch (_) { /* fallthrough para abertura direta */ }
-    }
+
     logActivity({ action: 'module_access', target: mod.name })
-    window.open(mod.url, '_blank', 'noopener')
+
+    // Sistemas fora dos domínios VP (sem SSO) — abre direto.
+    const SSO_DOMAINS = ['vpsistema.com', 'verticalparts.com']
+    const isSSO = mod.url && SSO_DOMAINS.some(d => mod.url.includes(d))
+    if (!isSSO) {
+      window.open(mod.url, '_blank', 'noopener')
+      return
+    }
+
+    // Abre a aba IMEDIATAMENTE, ainda dentro do gesto de clique. O link de SSO
+    // é resolvido de forma assíncrona; se chamássemos window.open() só depois do
+    // await, o navegador bloquearia como pop-up.
+    const win = window.open('about:blank', '_blank')
+
+    try {
+      const targetApp = new URL(mod.url).hostname.split('.')[0]
+      const { data, error } = await supabase.functions.invoke('sso-proxy', {
+        body: { targetApp },
+      })
+
+      let finalUrl = mod.url
+      if (!error && data?.actionLink) {
+        finalUrl = data.actionLink
+        // SSO por token: a edge function só consegue devolver o access_token
+        // (ele vem no header Authorization). O refresh_token existe apenas no
+        // cliente — sem ele, o setSession() do subsistema falha e o guard
+        // redireciona de volta ao portal (o "reload" relatado pelos usuários).
+        if (finalUrl.includes('sso_token=') && !finalUrl.includes('sso_refresh=')) {
+          const { data: { session } } = await supabase.auth.getSession()
+          if (session?.refresh_token) {
+            finalUrl += `&sso_refresh=${encodeURIComponent(session.refresh_token)}`
+          }
+        }
+      }
+
+      if (win) win.location.href = finalUrl
+      else window.open(finalUrl, '_blank', 'noopener')
+    } catch (_) {
+      // Falha ao gerar SSO — abre a URL direta na aba já aberta.
+      if (win) win.location.href = mod.url
+      else window.open(mod.url, '_blank', 'noopener')
+    }
   }
 
   async function handleLogout() {

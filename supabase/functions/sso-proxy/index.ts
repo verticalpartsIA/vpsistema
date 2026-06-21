@@ -53,6 +53,10 @@ const APPS: Record<string, AppConfig> = {
     ssoType: 'token',
     redirectTo: 'https://propostas.vpsistema.com',
   },
+  vpprd: {
+    ssoType: 'token',
+    redirectTo: 'https://vpprd.vpsistema.com',
+  },
 }
 
 serve(async (req: Request) => {
