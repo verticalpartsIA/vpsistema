@@ -16,25 +16,9 @@ function App() {
   const [linkExpired, setLinkExpired] = useState(false)
 
   useEffect(() => {
-    const hash   = window.location.hash
-    const params = new URLSearchParams(window.location.search)
-    const tokenHash = params.get('token')
-    const tokenType = params.get('type')
+    const hash = window.location.hash
 
-    // Fluxo da edge function: ?token=HASH&type=recovery
-    // O link aponta para o app — Outlook faz prefetch só do HTML (não executa JS), token seguro.
-    // Ao clicar, redirecionamos para /auth/v1/verify do Supabase (fluxo implicit nativo):
-    // Supabase valida o token e redireciona de volta para o app com #access_token=...&type=recovery,
-    // que o onAuthStateChange('PASSWORD_RECOVERY') já trata corretamente abaixo.
-    if (tokenHash && tokenType === 'recovery') {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ubdkoqxfwcraftesgmbw.supabase.co'
-      window.location.replace(
-        `${supabaseUrl}/auth/v1/verify?token=${encodeURIComponent(tokenHash)}&type=recovery&redirect_to=${encodeURIComponent('https://vpsistema.com')}`
-      )
-      return
-    }
-
-    // Fluxo legado via hash (implicit flow)
+    // Hash com erro de token expirado (fluxo implicit legado)
     if (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied')) {
       window.history.replaceState({}, '', window.location.pathname)
       setLinkExpired(true)

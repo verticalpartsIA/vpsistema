@@ -101,6 +101,8 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
   const [mode,         setMode]         = useState(forceMode || 'login')
   const [resetSent,    setResetSent]    = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
+  const [otpCode,      setOtpCode]      = useState('')
+  const [otpLoading,   setOtpLoading]   = useState(false)
   const [newPassword,  setNewPassword]  = useState('')
   const [confirmPass,  setConfirmPass]  = useState('')
   const [showNewPass,  setShowNewPass]  = useState(false)
@@ -146,6 +148,23 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
       return
     }
     setLoading(false)
+  }
+
+  async function handleVerifyOtp(e) {
+    e.preventDefault()
+    setError('')
+    setOtpLoading(true)
+    const { error: otpError } = await supabase.auth.verifyOtp({
+      email,
+      token: otpCode.trim(),
+      type: 'recovery',
+    })
+    setOtpLoading(false)
+    if (otpError) {
+      setError('Código inválido ou expirado. Solicite um novo código.')
+      return
+    }
+    // onAuthStateChange('PASSWORD_RECOVERY') dispara em App.jsx → mostra formulário de reset
   }
 
   async function handleForgotPassword(e) {
@@ -238,20 +257,46 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
     ),
 
     forgot: resetSent ? (
-      <div className="flex flex-col items-center gap-4 py-8 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand/10">
-          <CheckCircle className="h-7 w-7 text-brand" />
+      <>
+        <div className="mb-8">
+          <p className="mb-1 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand before:h-0.5 before:w-5 before:bg-brand before:content-['']">
+            Recuperar acesso
+          </p>
+          <h2 className="text-3xl font-extrabold tracking-tight text-black">Digite o código</h2>
+          <p className="mt-2 text-sm text-neutral-500">
+            Enviamos um código de 6 dígitos para{' '}
+            <span className="font-semibold text-black">{email}</span>.
+            Verifique sua caixa de entrada e cole o código abaixo.
+          </p>
         </div>
-        <h2 className="text-2xl font-extrabold text-black">E-mail enviado!</h2>
-        <p className="max-w-xs text-sm text-neutral-500">
-          Verifique sua caixa de entrada em <span className="font-semibold text-brand">{email}</span>{' '}
-          e clique no link para criar sua nova senha.
-        </p>
-        <button onClick={() => { setMode('login'); setResetSent(false); setError('') }}
-          className="mt-2 text-xs font-semibold text-neutral-500 transition-colors hover:text-black">
-          ← Voltar para o login
-        </button>
-      </div>
+        <form onSubmit={handleVerifyOtp} className="space-y-4">
+          <Field
+            label="Código de recuperação"
+            type="text"
+            value={otpCode}
+            onChange={e => setOtpCode(e.target.value)}
+            placeholder="ex: abc123"
+            required
+            icon={<CheckCircle className="h-4 w-4" />}
+          />
+          <ErrorBox />
+          <SubmitBtn disabled={otpLoading || otpCode.trim().length < 4}>
+            {otpLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verificando...</> : 'Confirmar código →'}
+          </SubmitBtn>
+          <div className="text-center space-y-2">
+            <button type="button"
+              onClick={() => { setResetSent(false); setOtpCode(''); setError('') }}
+              className="block w-full text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
+              Reenviar código
+            </button>
+            <button type="button"
+              onClick={() => { setMode('login'); setResetSent(false); setOtpCode(''); setError('') }}
+              className="text-xs font-semibold text-neutral-500 transition-colors hover:text-black">
+              ← Voltar para o login
+            </button>
+          </div>
+        </form>
+      </>
     ) : (
       <>
         <div className="mb-8">
