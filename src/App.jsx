@@ -22,18 +22,15 @@ function App() {
     const tokenType = params.get('type')
 
     // Fluxo da edge function: ?token=HASH&type=recovery
-    // O link aponta para o app, não para o Supabase — Outlook não consome o token ao prefetchar
+    // O link aponta para o app — Outlook faz prefetch só do HTML (não executa JS), token seguro.
+    // Ao clicar, redirecionamos para /auth/v1/verify do Supabase (fluxo implicit nativo):
+    // Supabase valida o token e redireciona de volta para o app com #access_token=...&type=recovery,
+    // que o onAuthStateChange('PASSWORD_RECOVERY') já trata corretamente abaixo.
     if (tokenHash && tokenType === 'recovery') {
-      window.history.replaceState({}, '', window.location.pathname)
-      supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
-        .then(({ error }) => {
-          if (error) {
-            setLinkExpired(true)
-          } else {
-            setIsRecovery(true)
-          }
-          setLoading(false)
-        })
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ubdkoqxfwcraftesgmbw.supabase.co'
+      window.location.replace(
+        `${supabaseUrl}/auth/v1/verify?token=${encodeURIComponent(tokenHash)}&type=recovery&redirect_to=${encodeURIComponent('https://vpsistema.com')}`
+      )
       return
     }
 
