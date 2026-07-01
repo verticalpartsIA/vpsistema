@@ -16,8 +16,9 @@ function App() {
   const [linkExpired, setLinkExpired] = useState(false)
 
   useEffect(() => {
-    // Detecta tipo do link na URL antes de qualquer coisa
     const hash = window.location.hash
+
+    // Hash com erro de token expirado (fluxo implicit legado)
     if (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied')) {
       window.history.replaceState({}, '', window.location.pathname)
       setLinkExpired(true)
@@ -25,7 +26,7 @@ function App() {
       return
     }
     if (hash.includes('type=invite') || hash.includes('type=recovery')) {
-      setIsRecovery(true) // reutiliza o mesmo fluxo de definir senha
+      setIsRecovery(true)
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
