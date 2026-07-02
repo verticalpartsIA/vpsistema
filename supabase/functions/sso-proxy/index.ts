@@ -95,11 +95,20 @@ serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    // Create user in target app if they don't exist
-    const { data: existing } = await admin.auth.admin.listUsers({ perPage: 1000 })
-    const exists = existing?.users?.some(u => u.email === user.email)
-    if (!exists) {
-      await admin.auth.admin.createUser({ email: user.email, email_confirm: true })
+    // Cria o usuário no app de destino. listUsers() só retorna a primeira página
+    // (perPage: 1000) — em projetos com mais usuários isso gera falso-negativo em
+    // "exists", tentando criar um e-mail duplicado. createUser() falha com
+    // "already registered", o erro sobe sem tratamento e a função inteira retorna
+    // 500 — SSO cai no fallback sem sessão e o app de destino redireciona de volta
+    // ao portal (reload infinito). Tentar criar direto e ignorar erro de duplicado
+    // evita a checagem prévia e a condição de corrida.
+    const { error: createErr } = await admin.auth.admin.createUser({
+      email: user.email,
+      email_confirm: true,
+    })
+    if (createErr && !/already.*registered|already.*exists/i.test(createErr.message ?? '')) {
+      console.error('createUser error:', createErr)
+      return json({ error: 'Failed to provision user in target app' }, 500)
     }
 
     // Generate magic link → user is auto-logged in on the target app
