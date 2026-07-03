@@ -241,11 +241,17 @@ vpsistema/
 
 ```
 Plataforma:   Hostinger Node.js
-Branch:       main  (auto-deploy a cada push)
+Branch:       main  (auto-deploy a cada push via GitHub Actions)
 Build:        npm run build  (Vite)
 Start:        node server.js  (ou serve dist/)
 Node:         18.x
 ```
+
+> A partir de 03/07/2026, o deploy é feito pelo workflow
+> `.github/workflows/deploy-hostinger.yml` (build + SCP/SSH), não mais pela
+> integração Git nativa do hPanel — que parou de funcionar após o
+> repositório ser renomeado para `001_vpsistema` e não pôde ser
+> reconectada pela interface.
 
 **Variáveis de ambiente no Hostinger:**
 ```
