@@ -76,8 +76,29 @@ jobs:
             echo "::warning::Secrets HOSTINGER_SSH_HOST/HOSTINGER_SSH_PASSWORD não configurados — pulando deploy. Veja instruções no arquivo do workflow."
           fi
 
-      - name: Deploy dist/ via SCP (senha)
+      # Tentativa 1 — não falha o job sozinha; se der timeout (comum em hosts
+      # com fail2ban/rate-limit de conexão SSH), a tentativa 2 abaixo repete.
+      - name: Deploy dist/ via SCP (senha) — tentativa 1
+        id: scp_attempt1
         if: steps.check_secrets.outputs.configured == 'true'
+        continue-on-error: true
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HOSTINGER_SSH_HOST }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT }}
+          username: ${{ secrets.HOSTINGER_SSH_USER }}
+          password: ${{ secrets.HOSTINGER_SSH_PASSWORD }}
+          source: "dist/*"
+          target: ${{ secrets.HOSTINGER_REMOTE_PATH }}
+          strip_components: 1
+          overwrite: true
+
+      - name: Aguardar antes de repetir
+        if: steps.check_secrets.outputs.configured == 'true' && steps.scp_attempt1.outcome == 'failure'
+        run: sleep 20
+
+      - name: Deploy dist/ via SCP (senha) — tentativa 2
+        if: steps.check_secrets.outputs.configured == 'true' && steps.scp_attempt1.outcome == 'failure'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.HOSTINGER_SSH_HOST }}
