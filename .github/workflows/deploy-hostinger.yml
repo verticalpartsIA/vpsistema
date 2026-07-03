@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -46,3 +46,57 @@ jobs:
         with:
           name: dist
           path: dist
+
+      # ── Deploy real via SSH ────────────────────────────────────────────
+      # A integração Git nativa do hPanel (Websites → Node.js → Git) parou de
+      # funcionar após o rename do repositório para 001_vpsistema. Este passo
+      # substitui aquela dependência: envia o build direto pro servidor via
+      # SSH/rsync, sem depender de nenhuma reconexão manual no painel.
+      #
+      # Requer estes secrets no repositório (Settings → Secrets and variables
+      # → Actions), obtidos em hPanel → Avançado → Acesso SSH para o site
+      # vpsistema.com:
+      #   HOSTINGER_SSH_HOST      ex: 123.45.67.89
+      #   HOSTINGER_SSH_PORT      ex: 65002
+      #   HOSTINGER_SSH_USER      ex: u926853941
+      #   HOSTINGER_SSH_KEY       chave privada SSH (gerada com ssh-keygen,
+      #                           chave pública cadastrada no hPanel)
+      #   HOSTINGER_REMOTE_PATH   caminho da app no servidor,
+      #                           ex: /home/u926853941/domains/vpsistema.com/public_html
+      #
+      # Se algum desses secrets não estiver definido, este job é pulado (não
+      # quebra o build) — assim o workflow continua útil como CI mesmo antes
+      # de configurar o deploy.
+      - name: Check deploy secrets are configured
+        id: check_secrets
+        run: |
+          if [ -n "${{ secrets.HOSTINGER_SSH_HOST }}" ] && [ -n "${{ secrets.HOSTINGER_SSH_KEY }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secrets HOSTINGER_SSH_HOST/HOSTINGER_SSH_KEY não configurados — pulando deploy. Veja instruções no arquivo do workflow."
+          fi
+
+      - name: Deploy dist/ via rsync over SSH
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: easingthemes/ssh-deploy@v5
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          REMOTE_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          REMOTE_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          REMOTE_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          SOURCE: "dist/"
+          TARGET: ${{ secrets.HOSTINGER_REMOTE_PATH }}
+          ARGS: "-rlgoDzvc -i --delete"
+
+      - name: Restart Node.js app (Passenger)
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HOSTINGER_SSH_HOST }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT }}
+          username: ${{ secrets.HOSTINGER_SSH_USER }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          script: |
+            mkdir -p ${{ secrets.HOSTINGER_REMOTE_PATH }}/tmp
+            touch ${{ secrets.HOSTINGER_REMOTE_PATH }}/tmp/restart.txt
