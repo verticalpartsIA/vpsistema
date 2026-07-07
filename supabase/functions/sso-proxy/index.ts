@@ -1,62 +1,10 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { APPS } from '../_shared/apps.ts'
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-type MagicLinkApp = {
-  ssoType: 'magiclink'
-  url: string
-  serviceKeyEnv: string
-  redirectTo: string
-}
-
-type TokenApp = {
-  ssoType: 'token'
-  redirectTo: string
-}
-
-type AppConfig = MagicLinkApp | TokenApp
-
-const APPS: Record<string, AppConfig> = {
-  // Apps com Supabase Auth próprio → magic link
-  vprequisicoes: {
-    ssoType: 'magiclink',
-    url: 'https://vvgcrhtmzvssfdazkkzk.supabase.co',
-    serviceKeyEnv: 'VPREQ_SERVICE_KEY',
-    redirectTo: 'https://vprequisicoes.vpsistema.com',
-  },
-  posvenda360: {
-    ssoType: 'magiclink',
-    url: 'https://jkbklzlbhhfnamaeislb.supabase.co',
-    serviceKeyEnv: 'PV360_SERVICE_KEY',
-    redirectTo: 'https://posvenda360.vpsistema.com',
-  },
-  visitas: {
-    ssoType: 'magiclink',
-    url: 'https://bvvnoapdclxhuygptbza.supabase.co',
-    serviceKeyEnv: 'VISITAS_SERVICE_KEY',
-    redirectTo: 'https://visitas.vpsistema.com',
-  },
-  // Apps que validam o JWT do vpsistema via ?sso_token=
-  vpclick: {
-    ssoType: 'token',
-    redirectTo: 'https://vpclick.vpsistema.com',
-  },
-  catraca: {
-    ssoType: 'token',
-    redirectTo: 'https://catraca.vpsistema.com',
-  },
-  propostas: {
-    ssoType: 'token',
-    redirectTo: 'https://propostas.vpsistema.com',
-  },
-  vpprd: {
-    ssoType: 'token',
-    redirectTo: 'https://vpprd.vpsistema.com',
-  },
 }
 
 serve(async (req: Request) => {
