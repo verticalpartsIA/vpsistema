@@ -57,7 +57,7 @@ vpsistema.com
 │       ├── Catraca                 → https://catraca.vpsistema.com
 │       ├── Visitas                 → https://visitas.vpsistema.com
 │       ├── VPRequisições           → https://vprequisicoes.vpsistema.com
-│       ├── Cotação Importação|PRD  → https://vpprd.vpsistema.com        ← SSO
+│       ├── Cotação Importação|PRD  → https://vpgestaoimportacao.vpsistema.com ← SSO
 │       ├── VP Click                → https://vpclick.vpsistema.com      ← SSO
 │       ├── Engenharia              → https://engenharia.vpsistema.com   ← SSO
 │       ├── Suporte                 → https://suporte.vpsistema.com      ← SSO
@@ -84,7 +84,7 @@ vpsistema.com
 | 1    | `catraca`            | Catraca                 | https://catraca.vpsistema.com              | ✅    | `#F59E0B` |
 | 2    | `visitas`            | Visitas                 | https://visitas.vpsistema.com              | ✅    | `#10B981` |
 | 3    | `vprequisicoes`      | VPRequisições           | https://vprequisicoes.vpsistema.com/login  | ✅    | `#F59E0B` |
-| 5    | `cotacao-importacao` | Cotação Importação\|PRD | https://vpprd.vpsistema.com                | ✅    | `#0EA5E9` |
+| 5    | `cotacao-importacao` | Cotação Importação\|PRD | https://vpgestaoimportacao.vpsistema.com   | ✅    | `#0EA5E9` |
 | 6    | `click`              | VP Click                | https://vpclick.vpsistema.com              | ✅    | `#EC4899` |
 | 7    | `engenharia`         | Engenharia              | https://engenharia.vpsistema.com           | ✅    | `#F97316` |
 | 9    | `suporte`            | Suporte                 | https://suporte.vpsistema.com              | ✅    | `#64748B` |
@@ -101,7 +101,7 @@ vpsistema.com
 1. Colaborador faz login em vpsistema.com
 2. Clica em um card de módulo (ex: "Cotação Importação | PRD")
 3. O Dashboard busca session.access_token + session.refresh_token do Supabase
-4. Injeta na URL: https://vpprd.vpsistema.com/?sso_token=ACCESS&sso_refresh=REFRESH
+4. Injeta na URL: https://vpgestaoimportacao.vpsistema.com/?sso_token=ACCESS&sso_refresh=REFRESH
 5. Abre em nova aba (_blank, noopener)
 6. O subsistema recebe os tokens, chama sb.auth.setSession() e autentica o usuário
 7. O subsistema redireciona para ?sso_token no próprio URL (sem expor tokens no histórico)

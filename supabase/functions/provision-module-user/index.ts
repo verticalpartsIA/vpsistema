@@ -23,7 +23,7 @@ serve(async (req: Request) => {
 
     const app = APPS[moduleSlug]
     if (!app || app.ssoType !== 'magiclink') {
-      // Apps token-based (vpclick, catraca, propostas, vpprd) não têm
+      // Apps token-based (vpclick, catraca, propostas, vpgestaoimportacao) não têm
       // Supabase Auth próprio — nada a provisionar.
       return json({ ok: true, skipped: true })
     }
