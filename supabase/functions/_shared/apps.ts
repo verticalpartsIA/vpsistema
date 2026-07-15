@@ -49,8 +49,9 @@ export const APPS: Record<string, AppConfig> = {
     ssoType: 'token',
     redirectTo: 'https://propostas.vpsistema.com',
   },
-  vpprd: {
+  vpgestaoimportacao: {
     ssoType: 'token',
-    redirectTo: 'https://vpprd.vpsistema.com',
+    redirectTo: 'https://vpgestaoimportacao.vpsistema.com',
   },
 }
+

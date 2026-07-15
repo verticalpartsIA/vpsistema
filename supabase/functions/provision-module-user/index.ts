@@ -21,10 +21,31 @@ serve(async (req: Request) => {
       return json({ error: 'user_id e module_slug são obrigatórios' }, 400)
     }
 
+    // VP Click (slug "click") tem banco/perfis próprios: encaminha o aviso
+    // para a função de provisionamento DO VP CLICK, que reconfirma a
+    // permissão aqui (confirm-permission) e cria/reativa ou desativa o
+    // usuário lá. Disparado tanto na concessão quanto na revogação.
+    if (moduleSlug === 'click') {
+      const res = await fetch(
+        'https://sfpnjwllcmentoocylow.supabase.co/functions/v1/provision-from-vpsistema',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId, module_slug: 'click' }),
+        },
+      )
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        console.error('provision-from-vpsistema respondeu', res.status, body)
+        return json({ error: 'Falha ao provisionar no VP Click' }, 502)
+      }
+      return json({ ok: true, forwarded: 'vpclick', ...body })
+    }
+
     const app = APPS[moduleSlug]
     if (!app || app.ssoType !== 'magiclink') {
-      // Apps token-based (vpclick, catraca, propostas, vpprd) não têm
-      // Supabase Auth próprio — nada a provisionar.
+      // Demais apps token-based (catraca, propostas, vpgestaoimportacao) não
+      // têm Supabase Auth próprio — nada a provisionar.
       return json({ ok: true, skipped: true })
     }
 
