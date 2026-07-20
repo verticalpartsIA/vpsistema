@@ -328,11 +328,29 @@ export default function Admin({ onBack }) {
       setDeleting(false)
       return
     }
+
+    const name = deleteUser.name || deleteUser.email
+
+    if (data?.action === 'inactivated') {
+      // Usuário tem transações registradas em algum satélite: exclusão
+      // vira inativação para não órfão dados de negócio já gravados lá.
+      logActivity({ action: 'delete_user', target: deleteUser.email, details: { resultado: 'inativado_por_transacoes' } })
+      setUsers(prev => prev.map(p => p.id === deleteUser.id ? { ...p, is_active: false } : p))
+      setDeleteUser(null)
+      setDeleting(false)
+      setActionMsg({
+        type: 'success',
+        text: `${name} possui transações registradas em algum sistema — foi apenas inativado, não excluído.`
+      })
+      setTimeout(() => setActionMsg(null), 5000)
+      return
+    }
+
     logActivity({ action: 'delete_user', target: deleteUser.email })
     setUsers(prev => prev.filter(u => u.id !== deleteUser.id))
     setDeleteUser(null)
     setDeleting(false)
-    setActionMsg({ type: 'success', text: `${deleteUser.name || deleteUser.email} foi excluído de todos os sistemas.` })
+    setActionMsg({ type: 'success', text: `${name} foi excluído de todos os sistemas.` })
     setTimeout(() => setActionMsg(null), 4000)
   }
 
@@ -896,8 +914,9 @@ export default function Admin({ onBack }) {
                 <h2 className="text-white font-bold text-lg">Excluir colaborador?</h2>
                 <p className="text-slate-400 text-sm mt-1">
                   <span className="text-white font-semibold">{deleteUser.name || deleteUser.email}</span> será
-                  removido permanentemente de <span className="text-red-400 font-semibold">todos os sistemas VP</span>.
-                  Esta ação não pode ser desfeita.
+                  removido permanentemente de <span className="text-red-400 font-semibold">todos os sistemas VP</span>,
+                  desde que não tenha transações registradas neles. Havendo qualquer transação, o colaborador
+                  será apenas <span className="text-yellow-400 font-semibold">inativado</span> em vez de excluído.
                 </p>
               </div>
               {deleteMsg && (
