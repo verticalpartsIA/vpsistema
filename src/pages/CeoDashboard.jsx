@@ -110,6 +110,7 @@ function Timeline() {
   const [loading, setLoading] = useState(true)
   const [expandedDepts, setExpandedDepts] = useState(new Set())
   const [expandedUsers, setExpandedUsers] = useState(new Set())
+  const [expandedDates, setExpandedDates] = useState(new Set())
 
   function toggleDept(dept) {
     setExpandedDepts(prev => {
@@ -122,6 +123,13 @@ function Timeline() {
     setExpandedUsers(prev => {
       const next = new Set(prev)
       next.has(email) ? next.delete(email) : next.add(email)
+      return next
+    })
+  }
+  function toggleDate(key) {
+    setExpandedDates(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
       return next
     })
   }
@@ -199,29 +207,41 @@ function Timeline() {
                           </button>
 
                           {userOpen && (
-                            <div className="pl-9 pb-5 space-y-5">
-                              {user.days.map(day => (
-                                <div key={day.dateKey}>
-                                  <div className="flex items-center gap-3 mb-2">
-                                    <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{day.label}</span>
-                                    <div className="flex-1 h-px bg-surface-border" />
+                            <div className="pl-9 pb-3 space-y-1">
+                              {user.days.map(day => {
+                                const dateKey = `${user.user_email}::${day.dateKey}`
+                                const dateOpen = expandedDates.has(dateKey)
+                                return (
+                                  <div key={day.dateKey}>
+                                    <button
+                                      onClick={() => toggleDate(dateKey)}
+                                      className="w-full flex items-center gap-2 py-2 hover:bg-white/5 rounded-lg transition-colors text-left"
+                                    >
+                                      {dateOpen ? <ChevronDown className="w-3 h-3 text-slate-500 shrink-0" /> : <ChevronRight className="w-3 h-3 text-slate-500 shrink-0" />}
+                                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{day.label}</span>
+                                      <span className="text-slate-600 text-xs">({day.items.length})</span>
+                                      <div className="flex-1 h-px bg-surface-border" />
+                                    </button>
+
+                                    {dateOpen && (
+                                      <div className="pl-5 pb-3 space-y-1">
+                                        {day.items.map(item => {
+                                          const { icon: Icon, color, bg, border, text } = timelineLabel(item)
+                                          return (
+                                            <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
+                                              <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
+                                                <Icon className="w-3 h-3" />
+                                                {text}
+                                              </span>
+                                              <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="space-y-1">
-                                    {day.items.map(item => {
-                                      const { icon: Icon, color, bg, border, text } = timelineLabel(item)
-                                      return (
-                                        <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
-                                          <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
-                                            <Icon className="w-3 h-3" />
-                                            {text}
-                                          </span>
-                                          <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
-                                        </div>
-                                      )
-                                    })}
-                                  </div>
-                                </div>
-                              ))}
+                                )
+                              })}
                             </div>
                           )}
                         </div>
