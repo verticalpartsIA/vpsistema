@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
 import Login        from './pages/Login'
 import Dashboard    from './pages/Dashboard'
@@ -14,6 +14,9 @@ function App() {
   const [view,       setView]       = useState('dashboard') // 'dashboard' | 'admin' | 'ceo' | 'logs'
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
+  // Guarda o id do usuário já logado — o SIGNED_IN do Supabase dispara de novo
+  // (troca de aba, foco na janela, refresh de token) sem ser um login real.
+  const loggedUserIdRef = useRef(null)
 
   useEffect(() => {
     const hash = window.location.hash
@@ -30,6 +33,7 @@ function App() {
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      loggedUserIdRef.current = session?.user?.id ?? null
       setUser(session?.user ?? null)
       setLoading(false)
     })
@@ -41,10 +45,15 @@ function App() {
         return
       }
       if (event === 'SIGNED_IN') {
-        logActivity({ action: 'login' })
+        const uid = session?.user?.id ?? null
+        if (uid && uid !== loggedUserIdRef.current) {
+          logActivity({ action: 'login' })
+        }
+        loggedUserIdRef.current = uid
       }
       if (event === 'SIGNED_OUT') {
         logActivity({ action: 'logout' })
+        loggedUserIdRef.current = null
       }
       setUser(session?.user ?? null)
       if (!session?.user) {
