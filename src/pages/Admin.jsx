@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { logActivity } from '../lib/activityLog'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
-  CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil
+  CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
+  ChevronRight, ChevronDown
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
@@ -25,6 +26,17 @@ export default function Admin({ onBack }) {
   const [search,   setSearch]  = useState('')
   const [filterDept,   setFilterDept]   = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+
+  // Seções de departamento expandidas (a lista some grande demais se tudo
+  // ficar aberto de uma vez — cada departamento fica fechado até clicarem)
+  const [expandedDepts, setExpandedDepts] = useState(new Set())
+  function toggleDept(dept) {
+    setExpandedDepts(prev => {
+      const next = new Set(prev)
+      next.has(dept) ? next.delete(dept) : next.add(dept)
+      return next
+    })
+  }
 
   // Modal convite
   const [showInvite,    setShowInvite]    = useState(false)
@@ -411,14 +423,16 @@ export default function Admin({ onBack }) {
 
   // Agrupa por departamento (título da seção) com o chefe (is_department_lead)
   // sempre no topo, seguido pelos demais por nível e depois por nome.
+  // Inativos saem do departamento de origem e vão todos para uma seção
+  // única "Inativos", que fica sempre por último, antes de "Sem departamento".
   const LEVEL_RANK = { Administrador: 0, Lider: 1, Colaborador: 2 }
   const groupsByDept = new Map()
   for (const u of filtered) {
-    const dept = u.department || 'Sem departamento'
+    const dept = !u.is_active ? 'Inativos' : (u.department || 'Sem departamento')
     if (!groupsByDept.has(dept)) groupsByDept.set(dept, [])
     groupsByDept.get(dept).push(u)
   }
-  const deptOrder = [...DEPARTMENTS, 'Sem departamento']
+  const deptOrder = [...DEPARTMENTS, 'Inativos', 'Sem departamento']
   const grouped = [
     ...deptOrder.filter(d => groupsByDept.has(d)),
     ...[...groupsByDept.keys()].filter(d => !deptOrder.includes(d)),
@@ -559,15 +573,23 @@ export default function Admin({ onBack }) {
                         Nenhum colaborador encontrado.
                       </td>
                     </tr>
-                  ) : grouped.map(group => (
+                  ) : grouped.map(group => {
+                    const isOpen = Boolean(search.trim()) || expandedDepts.has(group.dept)
+                    return (
                     <Fragment key={group.dept}>
-                      <tr className="bg-surface/60">
+                      <tr
+                        className="bg-surface/60 cursor-pointer select-none hover:bg-surface/80 transition-colors"
+                        onClick={() => toggleDept(group.dept)}
+                      >
                         <td colSpan={5} className="px-6 py-3">
-                          <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
-                          <span className="text-slate-500 text-xs ml-2">({group.members.length})</span>
+                          <div className="flex items-center gap-2">
+                            {isOpen ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
+                            <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
+                            <span className="text-slate-500 text-xs">({group.members.length})</span>
+                          </div>
                         </td>
                       </tr>
-                      {group.members.map(u => (
+                      {isOpen && group.members.map(u => (
                         <tr key={u.id} className={`transition-colors hover:bg-surface/40 ${!u.is_active ? 'opacity-50' : ''}`}>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
@@ -719,7 +741,7 @@ export default function Admin({ onBack }) {
                         </tr>
                       ))}
                     </Fragment>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>
