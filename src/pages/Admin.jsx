@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logActivity } from '../lib/activityLog'
 import {
@@ -409,6 +409,29 @@ export default function Admin({ onBack }) {
     return matchSearch && matchDept && matchStatus
   })
 
+  // Agrupa por departamento (título da seção) com o chefe (is_department_lead)
+  // sempre no topo, seguido pelos demais por nível e depois por nome.
+  const LEVEL_RANK = { Administrador: 0, Lider: 1, Colaborador: 2 }
+  const groupsByDept = new Map()
+  for (const u of filtered) {
+    const dept = u.department || 'Sem departamento'
+    if (!groupsByDept.has(dept)) groupsByDept.set(dept, [])
+    groupsByDept.get(dept).push(u)
+  }
+  const deptOrder = [...DEPARTMENTS, 'Sem departamento']
+  const grouped = [
+    ...deptOrder.filter(d => groupsByDept.has(d)),
+    ...[...groupsByDept.keys()].filter(d => !deptOrder.includes(d)),
+  ].map(dept => ({
+    dept,
+    members: groupsByDept.get(dept).sort((a, b) => {
+      if (a.is_department_lead !== b.is_department_lead) return a.is_department_lead ? -1 : 1
+      const rankDiff = (LEVEL_RANK[a.level] ?? 3) - (LEVEL_RANK[b.level] ?? 3)
+      if (rankDiff !== 0) return rankDiff
+      return (a.name || '').localeCompare(b.name || '')
+    }),
+  }))
+
   const total    = users.length
   const ativos   = users.filter(u => u.is_active).length
   const inativos = users.filter(u => !u.is_active).length
@@ -523,7 +546,6 @@ export default function Admin({ onBack }) {
                 <thead>
                   <tr className="border-b border-surface-border">
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Colaborador</th>
-                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Departamento</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden sm:table-cell">Nível</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4">Status</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden lg:table-cell">Acessos</th>
@@ -533,12 +555,20 @@ export default function Admin({ onBack }) {
                 <tbody className="divide-y divide-surface-border">
                   {filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="text-center text-slate-500 py-12 text-sm">
+                      <td colSpan={5} className="text-center text-slate-500 py-12 text-sm">
                         Nenhum colaborador encontrado.
                       </td>
                     </tr>
-                  ) : filtered.map(u => (
-                    <tr key={u.id} className={`transition-colors hover:bg-surface/40 ${!u.is_active ? 'opacity-50' : ''}`}>
+                  ) : grouped.map(group => (
+                    <Fragment key={group.dept}>
+                      <tr className="bg-surface/60">
+                        <td colSpan={5} className="px-6 py-3">
+                          <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
+                          <span className="text-slate-500 text-xs ml-2">({group.members.length})</span>
+                        </td>
+                      </tr>
+                      {group.members.map(u => (
+                        <tr key={u.id} className={`transition-colors hover:bg-surface/40 ${!u.is_active ? 'opacity-50' : ''}`}>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           {/* Avatar clicável com overlay "Trocar avatar" */}
@@ -577,6 +607,14 @@ export default function Admin({ onBack }) {
                           <div>
                             <div className="flex items-center gap-1.5">
                               <p className="text-white text-sm font-medium leading-none">{u.name}</p>
+                              {u.is_department_lead && (
+                                <span
+                                  className="text-[10px] font-bold uppercase tracking-wide text-brand bg-brand/15 px-1.5 py-0.5 rounded"
+                                  title="Chefe do departamento"
+                                >
+                                  Chefe
+                                </span>
+                              )}
                               <button
                                 onClick={() => openEditName(u)}
                                 className="text-white hover:text-brand transition-colors"
@@ -588,9 +626,6 @@ export default function Admin({ onBack }) {
                             <p className="text-slate-500 text-xs mt-0.5">{u.email}</p>
                           </div>
                         </div>
-                      </td>
-                      <td className="px-4 py-4 hidden md:table-cell">
-                        <span className="text-slate-400 text-sm">{u.department || '—'}</span>
                       </td>
                       <td className="px-4 py-4 hidden sm:table-cell">
                         <span className={`text-xs font-medium px-2.5 py-1 rounded-full
@@ -681,7 +716,9 @@ export default function Admin({ onBack }) {
                           </button>
                         </div>
                       </td>
-                    </tr>
+                        </tr>
+                      ))}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
