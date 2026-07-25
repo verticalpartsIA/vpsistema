@@ -11,7 +11,7 @@ import { getModuleIcon } from '../lib/moduleIcons'
 // CEO fica sempre primeiro (não é um departamento, é a liderança geral).
 // Os demais ficam em ordem alfabética — assim nenhum departamento parece
 // "mais importante" que outro, é só A-Z mesmo.
-const DEPARTMENTS = [
+export const DEPARTMENTS = [
   'CEO',
   'Adm/Financeiro',
   'Comercial',

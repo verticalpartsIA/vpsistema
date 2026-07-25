@@ -1,9 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase as sbPortal } from '../lib/supabase'
+import { DEPARTMENTS } from './Admin'
 import {
   ArrowLeft, Loader2, BarChart2, Clock, LogIn, LogOut, Monitor,
-  UserPlus, Shield, ClipboardList, Activity as ActivityIcon, RefreshCw
+  UserPlus, Shield, ClipboardList, Activity as ActivityIcon, RefreshCw,
+  ChevronRight, ChevronDown, Star
 } from 'lucide-react'
+
+const LEVEL_RANK = { Administrador: 0, Lider: 1, Colaborador: 2 }
 
 const APP_LABELS = {
   vpsistema:          'vpsistema',
@@ -57,7 +61,7 @@ function formatDateGroup(iso) {
   return d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })
 }
 
-function groupByUserAndDate(items) {
+function groupByDeptAndUser(items, profileByEmail) {
   // Agrupa por usuário, depois por dia dentro de cada usuário, mais recente primeiro.
   const byUser = new Map()
   for (const item of items) {
@@ -72,35 +76,79 @@ function groupByUserAndDate(items) {
     }
     day.items.push(item)
   }
-  return Array.from(byUser.values())
+  const users = Array.from(byUser.values())
     .sort((a, b) => new Date(b.days[0]?.items[0]?.criado_em || 0) - new Date(a.days[0]?.items[0]?.criado_em || 0))
+
+  // Mesma regra da tela de Permissões: agrupa por departamento (chefe primeiro,
+  // depois por nível, depois por nome), inativos numa seção própria por último.
+  const groupsByDept = new Map()
+  for (const u of users) {
+    const profile = profileByEmail.get((u.user_email || '').toLowerCase())
+    const dept = profile && profile.is_active === false ? 'Inativos' : (profile?.department || 'Sem departamento')
+    if (!groupsByDept.has(dept)) groupsByDept.set(dept, [])
+    groupsByDept.get(dept).push({ ...u, profile })
+  }
+  const deptOrder = [...DEPARTMENTS, 'Inativos', 'Sem departamento']
+  return [
+    ...deptOrder.filter(d => groupsByDept.has(d)),
+    ...[...groupsByDept.keys()].filter(d => !deptOrder.includes(d)),
+  ].map(dept => ({
+    dept,
+    members: groupsByDept.get(dept).sort((a, b) => {
+      const pa = a.profile, pb = b.profile
+      if (Boolean(pa?.is_department_lead) !== Boolean(pb?.is_department_lead)) return pa?.is_department_lead ? -1 : 1
+      const rankDiff = (LEVEL_RANK[pa?.level] ?? 3) - (LEVEL_RANK[pb?.level] ?? 3)
+      if (rankDiff !== 0) return rankDiff
+      return (a.user_name || '').localeCompare(b.user_name || '')
+    }),
+  }))
 }
 
 function Timeline() {
   const [items, setItems] = useState([])
+  const [profileByEmail, setProfileByEmail] = useState(new Map())
   const [loading, setLoading] = useState(true)
+  const [expandedDepts, setExpandedDepts] = useState(new Set())
+  const [expandedUsers, setExpandedUsers] = useState(new Set())
+
+  function toggleDept(dept) {
+    setExpandedDepts(prev => {
+      const next = new Set(prev)
+      next.has(dept) ? next.delete(dept) : next.add(dept)
+      return next
+    })
+  }
+  function toggleUser(email) {
+    setExpandedUsers(prev => {
+      const next = new Set(prev)
+      next.has(email) ? next.delete(email) : next.add(email)
+      return next
+    })
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [logsRes, eventsRes] = await Promise.all([
+    const [logsRes, eventsRes, profilesRes] = await Promise.all([
       sbPortal.from('activity_logs').select('*').order('criado_em', { ascending: false }).limit(300),
       sbPortal.from('activity_events').select('*').order('criado_em', { ascending: false }).limit(300),
+      sbPortal.from('profiles').select('email, name, department, level, is_department_lead, is_active'),
     ])
     const logs   = (logsRes.data   || []).map(l => ({ ...l, kind: 'log' }))
     const events = (eventsRes.data || []).map(e => ({ ...e, kind: 'event' }))
     const merged = [...logs, ...events].sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
     setItems(merged)
+    setProfileByEmail(new Map((profilesRes.data || []).map(p => [(p.email || '').toLowerCase(), p])))
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const groups = groupByUserAndDate(items)
+  const groups = groupByDeptAndUser(items, profileByEmail)
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-slate-400 text-sm">Rastro de acesso e navegação entre todos os sistemas, por colaborador.</p>
+        <p className="text-slate-400 text-sm">Rastro de acesso e navegação entre todos os sistemas, por departamento e colaborador.</p>
         <button onClick={load} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Atualizar">
           <RefreshCw className="w-4 h-4" />
         </button>
@@ -116,42 +164,74 @@ function Timeline() {
           <p className="text-sm">Nenhum evento encontrado.</p>
         </div>
       ) : (
-        <div className="space-y-8">
-          {groups.map(user => (
-            <div key={user.user_email} className="bg-surface-card border border-surface-border rounded-2xl p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-full bg-brand/20 ring-2 ring-brand/30 flex items-center justify-center flex-shrink-0">
-                  <span className="text-brand font-bold text-xs">{(user.user_name || user.user_email || '?').slice(0, 2).toUpperCase()}</span>
-                </div>
-                <span className="text-white font-semibold text-sm">{user.user_name || user.user_email}</span>
-              </div>
+        <div className="bg-surface-card border border-surface-border rounded-2xl overflow-hidden divide-y divide-surface-border">
+          {groups.map(group => {
+            const deptOpen = expandedDepts.has(group.dept)
+            return (
+              <div key={group.dept}>
+                <button
+                  onClick={() => toggleDept(group.dept)}
+                  className="w-full flex items-center gap-2 px-5 py-3 bg-surface/60 hover:bg-surface/80 transition-colors text-left"
+                >
+                  {deptOpen ? <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
+                  <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
+                  <span className="text-slate-500 text-xs">({group.members.length})</span>
+                </button>
 
-              <div className="space-y-5">
-                {user.days.map(day => (
-                  <div key={day.dateKey}>
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{day.label}</span>
-                      <div className="flex-1 h-px bg-surface-border" />
-                    </div>
-                    <div className="space-y-1">
-                      {day.items.map(item => {
-                        const { icon: Icon, color, bg, border, text } = timelineLabel(item)
-                        return (
-                          <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
-                            <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
-                              <Icon className="w-3 h-3" />
-                              {text}
-                            </span>
-                            <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
+                {deptOpen && (
+                  <div className="divide-y divide-surface-border/60">
+                    {group.members.map(user => {
+                      const userOpen = expandedUsers.has(user.user_email)
+                      return (
+                        <div key={user.user_email} className="pl-7">
+                          <button
+                            onClick={() => toggleUser(user.user_email)}
+                            className="w-full flex items-center gap-2 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                          >
+                            {userOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
+                            <div className="w-6 h-6 rounded-full bg-brand/20 ring-1 ring-brand/30 flex items-center justify-center flex-shrink-0">
+                              <span className="text-brand font-bold text-[10px]">{(user.user_name || user.user_email || '?').slice(0, 2).toUpperCase()}</span>
+                            </div>
+                            <span className="text-white font-medium text-sm">{user.user_name || user.user_email}</span>
+                            {user.profile?.is_department_lead && (
+                              <Star className="w-3 h-3 text-blue-400 fill-blue-400 shrink-0" title="Líder do departamento" />
+                            )}
+                          </button>
+
+                          {userOpen && (
+                            <div className="pl-9 pb-5 space-y-5">
+                              {user.days.map(day => (
+                                <div key={day.dateKey}>
+                                  <div className="flex items-center gap-3 mb-2">
+                                    <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{day.label}</span>
+                                    <div className="flex-1 h-px bg-surface-border" />
+                                  </div>
+                                  <div className="space-y-1">
+                                    {day.items.map(item => {
+                                      const { icon: Icon, color, bg, border, text } = timelineLabel(item)
+                                      return (
+                                        <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
+                                          <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
+                                            <Icon className="w-3 h-3" />
+                                            {text}
+                                          </span>
+                                          <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
