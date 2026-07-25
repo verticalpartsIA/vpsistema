@@ -8,15 +8,18 @@ import {
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
+// CEO fica sempre primeiro (não é um departamento, é a liderança geral).
+// Os demais ficam em ordem alfabética — assim nenhum departamento parece
+// "mais importante" que outro, é só A-Z mesmo.
 const DEPARTMENTS = [
   'CEO',
-  'Comercial',
-  'Marketing',
   'Adm/Financeiro',
-  'Gente & Gestão',
+  'Comercial',
   'Engenharia',
-  'Logística/Almoxarifado/Produção',
+  'Gente & Gestão',
   'Jurídico/Importação/Suprimentos',
+  'Logística/Almoxarifado/Produção',
+  'Marketing',
 ]
 const LEVELS = ['Administrador', 'Lider', 'Colaborador']
 
