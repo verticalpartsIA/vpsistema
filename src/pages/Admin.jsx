@@ -8,10 +8,13 @@ import {
 import { getModuleIcon } from '../lib/moduleIcons'
 
 const DEPARTMENTS = [
-  'Administrativo', 'Almoxarifado', 'Comercial', 'Compras',
-  'Engenharia', 'Financeiro', 'Juridico', 'Logistica',
-  'MKT', 'Montagem', 'Operacoes', 'PCP',
-  'Producao', 'Qualidade', 'RH', 'Vendas',
+  'Comercial',
+  'Marketing',
+  'Adm/Financeiro',
+  'Gente & Gestão',
+  'Engenharia',
+  'Logística/Almoxarifado/Produção',
+  'Jurídico/Importação/Suprimentos',
 ]
 const LEVELS = ['Administrador', 'Lider', 'Colaborador']
 
