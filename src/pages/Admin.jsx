@@ -695,11 +695,18 @@ export default function Admin({ onBack }) {
 
                       {/* Ícones de acesso inline */}
                       <td className="px-4 py-4 hidden lg:table-cell">
-                        {u.is_placeholder ? (
-                          <span className="text-xs text-slate-600 italic">Sem login</span>
-                        ) : (() => {
+                        {(() => {
                           const slugs = getUserSlugs(u.id)
-                          // Acesso total: mostra todos os ícones
+
+                          // Sem conta de login: "acesso pleno" (ausência de linhas)
+                          // não significa nada de verdade ainda, então só mostra
+                          // ícones se algum admin já pré-configurou módulos
+                          // específicos via Permissões — o resto continua "pendente"
+                          // até a pessoa ganhar um e-mail/login de verdade.
+                          if (u.is_placeholder && slugs === null) {
+                            return <span className="text-xs text-slate-600 italic">Sem acesso definido</span>
+                          }
+
                           const visibleMods = slugs === null
                             ? modules
                             : modules.filter(m => slugs.includes(m.slug))
@@ -717,8 +724,8 @@ export default function Admin({ onBack }) {
                                 return (
                                   <div
                                     key={mod.slug}
-                                    title={mod.name}
-                                    className="w-6 h-6 rounded-md flex items-center justify-center"
+                                    title={u.is_placeholder ? `${mod.name} (pendente — sem login ainda)` : mod.name}
+                                    className={`w-6 h-6 rounded-md flex items-center justify-center ${u.is_placeholder ? 'opacity-50' : ''}`}
                                     style={{ background: `${color}20` }}
                                   >
                                     <ModIcon
@@ -736,17 +743,17 @@ export default function Admin({ onBack }) {
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {!u.is_placeholder && (
-                            <button
-                              onClick={() => openPerms(u)}
-                              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border
-                                         border-brand/30 text-brand hover:bg-brand/10 transition-colors"
-                              title="Gerenciar cargo e acesso aos sistemas"
-                            >
-                              <Shield className="w-3.5 h-3.5" />
-                              Permissões
-                            </button>
-                          )}
+                          <button
+                            onClick={() => openPerms(u)}
+                            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border
+                                       border-brand/30 text-brand hover:bg-brand/10 transition-colors"
+                            title={u.is_placeholder
+                              ? 'Definir cargo e acessos com antecedência (valem quando ele tiver login)'
+                              : 'Gerenciar cargo e acesso aos sistemas'}
+                          >
+                            <Shield className="w-3.5 h-3.5" />
+                            Permissões
+                          </button>
                           <button
                             onClick={() => toggleActive(u)}
                             className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors
