@@ -4,12 +4,12 @@ import { logActivity } from '../lib/activityLog'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
   CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
-  ChevronRight, ChevronDown
+  ChevronRight, ChevronDown, Star
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
 const DEPARTMENTS = [
-  'Diretoria',
+  'CEO',
   'Comercial',
   'Marketing',
   'Adm/Financeiro',
@@ -651,12 +651,10 @@ export default function Admin({ onBack }) {
                             <div className="flex items-center gap-1.5">
                               <p className="text-white text-sm font-medium leading-none">{u.name}</p>
                               {u.is_department_lead && (
-                                <span
-                                  className="text-[10px] font-bold uppercase tracking-wide text-brand bg-brand/15 px-1.5 py-0.5 rounded"
-                                  title="Chefe do departamento"
-                                >
-                                  Chefe
-                                </span>
+                                <Star
+                                  className="w-3.5 h-3.5 text-blue-400 fill-blue-400 shrink-0"
+                                  title="Líder do departamento"
+                                />
                               )}
                               <button
                                 onClick={() => openEditName(u)}
