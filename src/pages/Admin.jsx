@@ -9,6 +9,7 @@ import {
 import { getModuleIcon } from '../lib/moduleIcons'
 
 const DEPARTMENTS = [
+  'Diretoria',
   'Comercial',
   'Marketing',
   'Adm/Financeiro',
@@ -335,6 +336,26 @@ export default function Admin({ onBack }) {
     if (!deleteUser) return
     setDeleting(true)
     setDeleteMsg(null)
+
+    // Cadastro Simples (is_placeholder): não existe conta de login em
+    // lugar nenhum, então não há o que fazer no delete-user — só remove a
+    // linha de profiles direto.
+    if (deleteUser.is_placeholder) {
+      const { error: delErr } = await supabase.from('profiles').delete().eq('id', deleteUser.id)
+      if (delErr) {
+        setDeleteMsg({ type: 'error', text: 'Erro ao remover.' })
+        setDeleting(false)
+        return
+      }
+      logActivity({ action: 'delete_user', target: deleteUser.name, details: { tipo: 'cadastro_simples' } })
+      setUsers(prev => prev.filter(u => u.id !== deleteUser.id))
+      setDeleteUser(null)
+      setDeleting(false)
+      setActionMsg({ type: 'success', text: `${deleteUser.name} foi removido da lista.` })
+      setTimeout(() => setActionMsg(null), 4000)
+      return
+    }
+
     const { data, error } = await supabase.functions.invoke('delete-user', {
       body: { user_id: deleteUser.id, email: deleteUser.email }
     })
@@ -645,7 +666,9 @@ export default function Admin({ onBack }) {
                                 <Pencil className="w-3 h-3" />
                               </button>
                             </div>
-                            <p className="text-slate-500 text-xs mt-0.5">{u.email}</p>
+                            <p className="text-slate-500 text-xs mt-0.5">
+                              {u.email || (u.is_placeholder && <span className="italic">Sem conta de login</span>)}
+                            </p>
                           </div>
                         </div>
                       </td>
@@ -671,7 +694,9 @@ export default function Admin({ onBack }) {
 
                       {/* Ícones de acesso inline */}
                       <td className="px-4 py-4 hidden lg:table-cell">
-                        {(() => {
+                        {u.is_placeholder ? (
+                          <span className="text-xs text-slate-600 italic">Sem login</span>
+                        ) : (() => {
                           const slugs = getUserSlugs(u.id)
                           // Acesso total: mostra todos os ícones
                           const visibleMods = slugs === null
@@ -710,15 +735,17 @@ export default function Admin({ onBack }) {
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => openPerms(u)}
-                            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border
-                                       border-brand/30 text-brand hover:bg-brand/10 transition-colors"
-                            title="Gerenciar cargo e acesso aos sistemas"
-                          >
-                            <Shield className="w-3.5 h-3.5" />
-                            Permissões
-                          </button>
+                          {!u.is_placeholder && (
+                            <button
+                              onClick={() => openPerms(u)}
+                              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border
+                                         border-brand/30 text-brand hover:bg-brand/10 transition-colors"
+                              title="Gerenciar cargo e acesso aos sistemas"
+                            >
+                              <Shield className="w-3.5 h-3.5" />
+                              Permissões
+                            </button>
+                          )}
                           <button
                             onClick={() => toggleActive(u)}
                             className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors
@@ -732,9 +759,9 @@ export default function Admin({ onBack }) {
                             onClick={() => { setDeleteUser(u); setDeleteMsg(null) }}
                             className="text-xs font-medium px-3 py-1.5 rounded-lg border
                                        border-red-700/40 text-red-500 hover:bg-red-700/15 transition-colors"
-                            title="Excluir permanentemente de todos os sistemas"
+                            title={u.is_placeholder ? 'Remover da lista' : 'Excluir permanentemente de todos os sistemas'}
                           >
-                            Excluir
+                            {u.is_placeholder ? 'Remover' : 'Excluir'}
                           </button>
                         </div>
                       </td>
@@ -973,12 +1000,23 @@ export default function Admin({ onBack }) {
                 <XCircle className="w-7 h-7 text-red-500" />
               </div>
               <div>
-                <h2 className="text-white font-bold text-lg">Excluir colaborador?</h2>
+                <h2 className="text-white font-bold text-lg">
+                  {deleteUser.is_placeholder ? 'Remover da lista?' : 'Excluir colaborador?'}
+                </h2>
                 <p className="text-slate-400 text-sm mt-1">
-                  <span className="text-white font-semibold">{deleteUser.name || deleteUser.email}</span> será
-                  removido permanentemente de <span className="text-red-400 font-semibold">todos os sistemas VP</span>,
-                  desde que não tenha transações registradas neles. Havendo qualquer transação, o colaborador
-                  será apenas <span className="text-yellow-400 font-semibold">inativado</span> em vez de excluído.
+                  {deleteUser.is_placeholder ? (
+                    <>
+                      <span className="text-white font-semibold">{deleteUser.name}</span> será
+                      removido da lista de colaboradores. Ele não tem conta de login em nenhum sistema VP.
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-white font-semibold">{deleteUser.name || deleteUser.email}</span> será
+                      removido permanentemente de <span className="text-red-400 font-semibold">todos os sistemas VP</span>,
+                      desde que não tenha transações registradas neles. Havendo qualquer transação, o colaborador
+                      será apenas <span className="text-yellow-400 font-semibold">inativado</span> em vez de excluído.
+                    </>
+                  )}
                 </p>
               </div>
               {deleteMsg && (
