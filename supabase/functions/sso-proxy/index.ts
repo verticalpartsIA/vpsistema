@@ -29,6 +29,13 @@ serve(async (req: Request) => {
     const app = APPS[targetApp]
     if (!app) return json({ error: 'Unknown app' }, 400)
 
+    const { data: prof } = await vpsistema
+      .from('profiles')
+      .select('name')
+      .eq('id', user.id)
+      .single()
+    logEnter(targetApp, user.email, prof?.name)
+
     // Token-based SSO: pass vpsistema JWT directly as ?sso_token=
     if (app.ssoType === 'token') {
       const token = authHeader.replace('Bearer ', '')
@@ -83,4 +90,24 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...CORS, 'Content-Type': 'application/json' },
   })
+}
+
+// Fire-and-forget: nunca deve atrasar ou quebrar o SSO.
+function logEnter(targetApp: string, email: string, name?: string | null) {
+  try {
+    const admin = createClient(
+      'https://ubdkoqxfwcraftesgmbw.supabase.co',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    )
+    admin.from('activity_events').insert({
+      app: targetApp,
+      event_type: 'enter',
+      user_email: email,
+      user_name: name || null,
+    }).then(({ error }) => {
+      if (error) console.error('logEnter error:', error)
+    })
+  } catch (_) {
+    // silencioso
+  }
 }
