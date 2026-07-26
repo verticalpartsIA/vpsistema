@@ -61,7 +61,7 @@ function BrandPanel() {
 }
 
 // ── Campo de formulário (estilo DS, fundo branco) ────────────────────────────
-function Field({ label, type = 'text', value, onChange, placeholder, required, icon, rightSlot }) {
+function Field({ label, type = 'text', value, onChange, placeholder, required, icon, rightSlot, autoComplete, name }) {
   return (
     <div>
       <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500">
@@ -75,10 +75,12 @@ function Field({ label, type = 'text', value, onChange, placeholder, required, i
         )}
         <input
           type={type}
+          name={name}
           value={value}
           onChange={onChange}
           placeholder={placeholder}
           required={required}
+          autoComplete={autoComplete}
           className="w-full rounded-lg border border-neutral-200 bg-white py-2.5 text-sm text-black placeholder-neutral-400
                      pl-9 pr-10 outline-none transition-colors
                      focus:border-brand focus:ring-2 focus:ring-brand/20"
@@ -235,12 +237,16 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
           <h2 className="text-3xl font-extrabold tracking-tight text-black">Entrar na plataforma</h2>
           <p className="mt-2 text-sm text-neutral-500">Use seu e-mail corporativo e senha cadastrados.</p>
         </div>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <Field label="E-mail" type="email" value={email} onChange={e => setEmail(e.target.value)}
-            placeholder="seu@verticalparts.com.br" required icon={<Mail className="h-4 w-4" />} />
-          <Field label="Senha" type={showPass ? 'text' : 'password'} value={password}
+        {/* autoComplete="off" no form + email sem preenchimento automático:
+            o e-mail precisa ser digitado sempre (pedido do cliente). A senha
+            mantém current-password para o gerenciador ainda poder preencher. */}
+        <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
+          <Field label="E-mail" type="email" name="vp-email" value={email} onChange={e => setEmail(e.target.value)}
+            placeholder="seu@verticalparts.com.br" required icon={<Mail className="h-4 w-4" />}
+            autoComplete="off" />
+          <Field label="Senha" type={showPass ? 'text' : 'password'} name="vp-password" value={password}
             onChange={e => setPassword(e.target.value)} placeholder="••••••••••" required
-            icon={<Lock className="h-4 w-4" />}
+            icon={<Lock className="h-4 w-4" />} autoComplete="current-password"
             rightSlot={<EyeBtn show={showPass} onToggle={() => setShowPass(v => !v)} />} />
           <ErrorBox />
           <SubmitBtn disabled={loading}>
