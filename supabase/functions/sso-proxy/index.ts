@@ -29,6 +29,38 @@ serve(async (req: Request) => {
     const app = APPS[targetApp]
     if (!app) return json({ error: 'Unknown app' }, 400)
 
+    // ── Controle de acesso por módulo (server-side) ──
+    // O bloqueio no Dashboard é só de UI: sem esta verificação, qualquer usuário
+    // autenticado podia chamar a função direto e obter SSO para qualquer app.
+    // Espelha a regra do front: sem linhas em module_permissions = acesso pleno;
+    // com linhas, o slug do módulo precisa estar entre elas.
+    // O slug da permissão NEM SEMPRE é igual ao targetApp (ex.: vpclick→click,
+    // posvenda360→vpposvenda360), então mapeamos pelo hostname da tabela modules.
+    const vpAdmin = createClient(
+      'https://ubdkoqxfwcraftesgmbw.supabase.co',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { auth: { autoRefreshToken: false, persistSession: false } },
+    )
+
+    const { data: mods } = await vpAdmin
+      .from('modules')
+      .select('slug, url, is_active')
+    const mod = (mods ?? []).find((m) => hostnamePrefix(m.url) === targetApp)
+    if (!mod || mod.is_active === false) {
+      return json({ error: 'Módulo indisponível' }, 400)
+    }
+
+    const { data: perms } = await vpsistema
+      .from('module_permissions')
+      .select('module_slug')
+      .eq('user_id', user.id)
+
+    const hasRestrictions = Array.isArray(perms) && perms.length > 0
+    const allowed = !hasRestrictions || perms!.some((p) => p.module_slug === mod.slug)
+    if (!allowed) {
+      return json({ error: 'Você não tem permissão para acessar este sistema.' }, 403)
+    }
+
     const { data: prof } = await vpsistema
       .from('profiles')
       .select('name')
@@ -90,6 +122,16 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...CORS, 'Content-Type': 'application/json' },
   })
+}
+
+// Primeiro rótulo do hostname de uma URL de módulo (ex.: "posvenda360" de
+// https://posvenda360.vpsistema.com/login). É a chave usada como targetApp.
+function hostnamePrefix(url: string): string {
+  try {
+    return new URL(url).hostname.split('.')[0]
+  } catch {
+    return ''
+  }
 }
 
 // Fire-and-forget: nunca deve atrasar ou quebrar o SSO.

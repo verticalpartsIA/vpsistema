@@ -32,6 +32,11 @@ Deno.serve(async (req) => {
     })
 
     if (linkError || !data?.properties?.email_otp) {
+      // Loga server-side para diagnóstico — sem isso, uma falha estrutural
+      // (service key errada, GoTrue sem email_otp) fica indistinguível de
+      // "e-mail não cadastrado" e ninguém descobre que o fluxo quebrou.
+      console.error('send-recovery-email: generateLink falhou ou sem email_otp:',
+        linkError?.message || 'email_otp ausente', '| email:', email)
       // Retorna sucesso mesmo se o e-mail não existe (evita enumeração de usuários)
       return new Response(JSON.stringify({ success: true }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

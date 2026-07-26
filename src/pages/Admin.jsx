@@ -47,6 +47,7 @@ export default function Admin({ onBack }) {
   const [invite,        setInvite]        = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
   const [inviting,      setInviting]      = useState(false)
   const [inviteMsg,     setInviteMsg]     = useState(null)
+  const [showResend,    setShowResend]    = useState(false)  // e-mail já cadastrado → oferecer reenvio de credenciais
   const [avatarFile,    setAvatarFile]    = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
 
@@ -276,11 +277,12 @@ export default function Admin({ onBack }) {
   function resetInviteModal() {
     setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
     setAvatarFile(null)
+    setShowResend(false)
     if (avatarPreview) { URL.revokeObjectURL(avatarPreview); setAvatarPreview(null) }
   }
 
-  async function handleInvite(e) {
-    e.preventDefault()
+  async function handleInvite(e, resend = false) {
+    e?.preventDefault()
     setInviting(true)
     setInviteMsg(null)
 
@@ -306,18 +308,36 @@ export default function Admin({ onBack }) {
         department: invite.department || null,
         password:   invite.password,
         avatar_url: avatarUrl,
+        resend,
       }
     })
 
-    if (error || data?.error) {
-      setInviteMsg({ type: 'error', text: error?.message || data?.error || 'Erro ao criar usuário.' })
+    // Em erro 4xx/5xx o supabase-js devolve um FunctionsHttpError genérico —
+    // o corpo real (com a mensagem e o flag already_exists) fica em error.context.
+    let payload = data
+    if (error && !payload) {
+      try { payload = await error.context.json() } catch { /* corpo não-JSON */ }
+    }
+
+    if (error || payload?.error) {
+      const msg = payload?.error || error?.message || 'Erro ao criar usuário.'
+      if (payload?.already_exists) {
+        setShowResend(true)
+        setInviteMsg({
+          type: 'error',
+          text: 'Este e-mail já tem conta (provável convite antigo sem e-mail). Use "Reenviar credenciais" abaixo: define esta senha temporária e envia o e-mail de acesso.',
+        })
+      } else {
+        setInviteMsg({ type: 'error', text: msg })
+      }
+      logActivity({ action: 'invite_user_failed', target: invite.email, details: { erro: msg } })
       setInviting(false)
       return
     }
 
     // Renomear o arquivo do avatar para o userId definitivo
-    if (avatarUrl && data?.user?.id) {
-      const userId = data.user.id
+    if (avatarUrl && payload?.user?.id) {
+      const userId = payload.user.id
       const ext    = avatarFile.name.split('.').pop() || 'jpg'
       const finalPath = `${userId}.${ext}`
       const tempPath  = avatarUrl.split('/avatars/')[1]
@@ -326,11 +346,29 @@ export default function Admin({ onBack }) {
       await supabase.from('profiles').update({ avatar_url: finalUrl }).eq('id', userId)
     }
 
-    const ok = data?.platforms?.filter(p => p.status === 'ok').map(p => p.platform) || []
-    const extra = ok.length > 0 ? ` Também criado em: ${ok.join(', ')}.` : ''
-    setInviteMsg({ type: 'success', text: `Usuário ${invite.email} criado com sucesso!${extra}` })
-    logActivity({ action: 'invite_user', target: invite.email, details: { nome: invite.name, nivel: invite.level } })
-    resetInviteModal()
+    const ok     = payload?.platforms?.filter(p => p.status === 'ok').map(p => p.platform) || []
+    const failed = payload?.platforms?.filter(p => p.status === 'error').map(p => p.platform) || []
+    const extra  = (ok.length > 0 ? ` Também criado em: ${ok.join(', ')}.` : '')
+      + (failed.length > 0 ? ` FALHOU em: ${failed.join(', ')}.` : '')
+
+    const verb = resend ? 'Credenciais redefinidas' : 'Usuário criado'
+    if (payload?.email_sent) {
+      setInviteMsg({ type: 'success', text: `${verb} e e-mail com os dados de acesso enviado para ${invite.email}!${extra}` })
+      resetInviteModal()
+    } else {
+      // Usuário criado/atualizado, mas o e-mail NÃO saiu — o admin precisa saber
+      // na hora, senão o colaborador fica sem acesso de novo (caso Regiane).
+      setInviteMsg({
+        type: 'error',
+        text: `${verb}, mas o e-mail NÃO foi enviado (${payload?.email_error || 'erro desconhecido'}). Informe a senha manualmente ou tente "Reenviar credenciais".${extra}`,
+      })
+      setShowResend(true)
+    }
+    logActivity({
+      action: 'invite_user',
+      target: invite.email,
+      details: { nome: invite.name, nivel: invite.level, email_enviado: Boolean(payload?.email_sent), reenvio: resend },
+    })
     loadAll()
     setInviting(false)
   }
@@ -1179,7 +1217,7 @@ export default function Admin({ onBack }) {
                              rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
                 />
                 <p className="text-slate-500 text-xs mt-1">
-                  O colaborador poderá trocar via "Esqueci minha senha" após o primeiro acesso.
+                  Enviada por e-mail ao colaborador junto com o link de acesso. Ele poderá trocar via "Esqueci minha senha".
                 </p>
               </div>
 
@@ -1206,6 +1244,19 @@ export default function Admin({ onBack }) {
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
                   : <><Send className="w-4 h-4" /> Enviar Convite</>}
               </button>
+
+              {showResend && (
+                <button
+                  type="button"
+                  onClick={() => handleInvite(null, true)}
+                  disabled={inviting}
+                  className="w-full bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/40
+                             disabled:opacity-60 text-orange-300 font-bold rounded-lg py-3 text-sm
+                             flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Send className="w-4 h-4" /> Reenviar credenciais (redefine a senha e envia o e-mail)
+                </button>
+              )}
 
             </form>
           </div>

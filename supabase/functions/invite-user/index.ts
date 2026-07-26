@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import nodemailer from 'npm:nodemailer'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,7 +76,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { email, name, level, department, password, avatar_url } = await req.json()
+    const { email, name, level, department, password, avatar_url, resend } = await req.json()
 
     if (!password || password.length < 6) {
       return new Response(JSON.stringify({ error: 'A senha temporária deve ter pelo menos 6 caracteres.' }), {
@@ -90,6 +91,7 @@ Deno.serve(async (req) => {
     )
 
     // 1. Cria o usuário no vpsistema com senha definida pelo admin
+    let mainUser = null
     const { data: mainData, error: mainError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -98,17 +100,51 @@ Deno.serve(async (req) => {
     })
 
     if (mainError) {
-      return new Response(JSON.stringify({ error: mainError.message }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
+      const alreadyExists = /already.*registered|already.*exists/i.test(mainError.message)
+
+      // "Reenviar credenciais": usuário já existe (convite anterior sem e-mail).
+      // Atualiza a senha para a nova temporária e segue para o envio do e-mail.
+      if (alreadyExists && resend) {
+        const { data: existing } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .ilike('email', email)
+          .single()
+
+        if (!existing?.id) {
+          return new Response(JSON.stringify({ error: 'Usuário já existe no Auth mas não foi encontrado em profiles — verifique manualmente.' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          })
+        }
+
+        const { data: updated, error: updError } = await supabaseAdmin.auth.admin.updateUserById(
+          existing.id, { password }
+        )
+        if (updError) {
+          return new Response(JSON.stringify({ error: `Falha ao redefinir a senha: ${updError.message}` }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          })
+        }
+        mainUser = updated.user
+      } else if (alreadyExists) {
+        return new Response(JSON.stringify({ error: mainError.message, already_exists: true }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      } else {
+        return new Response(JSON.stringify({ error: mainError.message }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
+    } else {
+      mainUser = mainData.user
     }
 
     // 1b. Salva avatar_url no profile (service role bypassa RLS)
-    if (avatar_url && mainData.user?.id) {
+    if (avatar_url && mainUser?.id) {
       await supabaseAdmin
         .from('profiles')
         .update({ avatar_url })
-        .eq('id', mainData.user.id)
+        .eq('id', mainUser.id)
     }
 
     // 2. Replica o usuário em todas as outras plataformas
@@ -128,19 +164,60 @@ Deno.serve(async (req) => {
           email_confirm: true,
           user_metadata: { name, department: department || null }
         })
+        const exists = error && /already.*registered|already.*exists/i.test(error.message)
         platformResults.push({
           platform: platform.name,
-          status: error ? 'error' : 'ok',
-          error: error?.message
+          status: error ? (exists ? 'exists' : 'error') : 'ok',
+          error: exists ? undefined : error?.message
         })
       } catch (e) {
         platformResults.push({ platform: platform.name, status: 'error', error: String(e) })
       }
     }
 
+    // 3. Envia o e-mail de boas-vindas com as credenciais.
+    //    Mesma via SMTP do send-recovery-email (Hostinger + nodemailer) — o
+    //    e-mail nativo do Supabase Auth nunca é acionado por admin.createUser,
+    //    então sem este passo o colaborador simplesmente não fica sabendo.
+    //    Falha aqui NÃO desfaz a criação: é reportada ao admin na resposta.
+    let emailSent = false
+    let emailError: string | null = null
+    try {
+      const smtpPassword = Deno.env.get('SMTP_PASSWORD')
+      if (!smtpPassword) {
+        throw new Error('SMTP_PASSWORD não configurado nos secrets da Edge Function.')
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: 'smtp.hostinger.com',
+        port: 587,
+        secure: false,
+        requireTLS: true,
+        auth: {
+          user: 'suporte@vpsistema.com',
+          pass: smtpPassword,
+        },
+      })
+
+      await transporter.sendMail({
+        from: '"VerticalParts" <suporte@vpsistema.com>',
+        to: email,
+        subject: 'Bem-vindo(a) ao Portal VerticalParts — seus dados de acesso',
+        text: `Olá, ${name || ''}!\n\nSua conta no Portal VerticalParts foi criada.\n\nAcesse: https://vpsistema.com\nE-mail: ${email}\nSenha temporária: ${password}\n\nRecomendamos trocar a senha no primeiro acesso usando a opção "Esqueceu a senha?".`,
+        html: buildWelcomeEmailHtml(name || '', email, password),
+      })
+      emailSent = true
+    } catch (e) {
+      emailError = String(e?.message || e)
+      console.error('invite-user: falha ao enviar e-mail de boas-vindas:', emailError)
+    }
+
     return new Response(JSON.stringify({
-      user: mainData.user,
-      platforms: platformResults
+      user: mainUser,
+      platforms: platformResults,
+      email_sent: emailSent,
+      email_error: emailError,
+      resent: Boolean(resend),
     }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
@@ -151,3 +228,117 @@ Deno.serve(async (req) => {
     })
   }
 })
+
+function buildWelcomeEmailHtml(name: string, email: string, password: string): string {
+  const firstName = (name || '').trim().split(' ')[0] || 'colaborador(a)'
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Bem-vindo(a) ao Portal VerticalParts</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f5">
+  <tr><td align="center" style="padding:40px 16px;">
+    <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
+      <tr>
+        <td bgcolor="#111111" align="center" style="padding:32px 40px;">
+          <img src="https://ubdkoqxfwcraftesgmbw.supabase.co/storage/v1/object/public/avatars/brand/logo-white.png"
+               alt="VerticalParts" height="36" style="display:block;height:36px;">
+        </td>
+      </tr>
+
+      <!-- Faixa amarela -->
+      <tr><td bgcolor="#F5C400" style="height:4px;font-size:0;line-height:0;">&nbsp;</td></tr>
+
+      <!-- Corpo -->
+      <tr>
+        <td bgcolor="#ffffff" style="padding:48px 40px 40px;">
+          <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#F5C400;">
+            &#8212;&nbsp; Bem-vindo(a)
+          </p>
+          <h1 style="margin:0 0 16px;font-size:28px;font-weight:800;color:#111111;line-height:1.2;">
+            Ol&aacute;, ${firstName}!
+          </h1>
+          <p style="margin:0 0 32px;font-size:15px;color:#555555;line-height:1.6;">
+            Sua conta no <strong>Portal VerticalParts</strong> foi criada.<br>
+            Use os dados abaixo para fazer seu primeiro acesso.
+          </p>
+
+          <!-- Credenciais em destaque -->
+          <table cellpadding="0" cellspacing="0" border="0" width="100%">
+            <tr>
+              <td align="center" bgcolor="#f8f8f8" style="border-radius:12px;border:2px solid #F5C400;padding:28px 20px;">
+                <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#999999;">
+                  Acesse
+                </p>
+                <p style="margin:0 0 16px;font-size:20px;font-weight:800;color:#111111;">
+                  <a href="https://vpsistema.com" style="color:#111111;text-decoration:none;">vpsistema.com</a>
+                </p>
+                <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#999999;">
+                  E-mail
+                </p>
+                <p style="margin:0 0 16px;font-size:16px;font-weight:700;color:#111111;font-family:'Courier New',monospace;">
+                  ${email}
+                </p>
+                <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#999999;">
+                  Senha tempor&aacute;ria
+                </p>
+                <p style="margin:0;font-size:24px;font-weight:800;letter-spacing:0.08em;color:#111111;font-family:'Courier New',monospace;">
+                  ${password}
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <!-- Instruções -->
+          <table cellpadding="0" cellspacing="0" border="0" style="margin-top:32px;width:100%;">
+            <tr>
+              <td bgcolor="#FFF6CC" style="border-left:4px solid #F5C400;border-radius:4px;padding:14px 18px;">
+                <p style="margin:0;font-size:13px;color:#7a6200;line-height:1.6;">
+                  <strong>Recomendado:</strong> troque esta senha tempor&aacute;ria no primeiro acesso.
+                  Em <a href="https://vpsistema.com" style="color:#7a6200;">vpsistema.com</a>, clique em
+                  <em>&ldquo;Esqueceu a senha?&rdquo;</em>, informe seu e-mail e siga as instru&ccedil;&otilde;es
+                  para definir uma senha s&oacute; sua.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <table cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;width:100%;">
+            <tr>
+              <td bgcolor="#f8f8f8" style="border-left:4px solid #dddddd;border-radius:4px;padding:14px 18px;">
+                <p style="margin:0;font-size:13px;color:#888888;">
+                  <strong>N&atilde;o esperava este e-mail?</strong> Fale com o administrador do portal em
+                  <a href="mailto:suporte@vpsistema.com" style="color:#888888;">suporte@vpsistema.com</a>.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td bgcolor="#111111" style="padding:24px 40px;" align="center">
+          <a href="https://vpsistema.com" style="text-decoration:none;">
+            <img src="https://ubdkoqxfwcraftesgmbw.supabase.co/storage/v1/object/public/avatars/brand/logo-white.png"
+                 alt="VerticalParts" height="24" style="display:block;height:24px;margin:0 auto 12px;">
+          </a>
+          <p style="margin:0;font-size:12px;color:#666666;">
+            &copy; 2026 VerticalParts &mdash;
+            <a href="mailto:suporte@vpsistema.com" style="color:#F5C400;text-decoration:none;">suporte@vpsistema.com</a>
+          </p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`
+}
