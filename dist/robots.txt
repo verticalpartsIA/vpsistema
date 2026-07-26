@@ -1,0 +1,4 @@
+# Portal corporativo interno da VerticalParts.
+# Não deve aparecer em nenhum buscador.
+User-agent: *
+Disallow: /
