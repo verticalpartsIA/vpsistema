@@ -4,7 +4,12 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ /index.html [L]
 
-# Cache longo para assets com hash no nome
+# Portal interno — fora de todos os buscadores (reforça o robots.txt e o meta noindex)
+<IfModule mod_headers.c>
+  Header set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+</IfModule>
+
+# Cache longo para assets com hash no nome (o nome muda a cada build)
 <IfModule mod_expires.c>
   ExpiresActive On
   ExpiresByType text/css "access plus 1 year"
@@ -12,4 +17,14 @@ RewriteRule ^ /index.html [L]
   ExpiresByType image/png "access plus 1 year"
   ExpiresByType image/jpeg "access plus 1 year"
   ExpiresByType image/svg+xml "access plus 1 year"
+</IfModule>
+
+# index.html NUNCA em cache: garante que cada visita baixe o app novo e,
+# com a sessão não-persistida, force login com e-mail e senha sempre.
+<IfModule mod_headers.c>
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
 </IfModule>
