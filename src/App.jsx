@@ -6,6 +6,8 @@ import Admin        from './pages/Admin'
 import CeoDashboard from './pages/CeoDashboard'
 import ActivityLog  from './pages/ActivityLog'
 import { logActivity } from './lib/activityLog'
+import { watchForNewVersion } from './lib/versionWatch'
+import UpdateToast from './components/UpdateToast'
 import { Loader2 } from 'lucide-react'
 
 function App() {
@@ -14,6 +16,10 @@ function App() {
   const [view,       setView]       = useState('dashboard') // 'dashboard' | 'admin' | 'ceo' | 'logs'
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
+  const [updateReady, setUpdateReady] = useState(false)
+  // Alguém digitou algo nesta aba? Se sim, recarregar sozinho jogaria fora um
+  // convite ou uma edição em andamento.
+  const typedRef = useRef(false)
   // Guarda o id do usuário já logado — o SIGNED_IN do Supabase dispara de novo
   // (troca de aba, foco na janela, refresh de token) sem ser um login real.
   const loggedUserIdRef = useRef(null)
@@ -65,6 +71,23 @@ function App() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // Deploy novo enquanto a aba estava aberta: troca o app sem ninguém precisar
+  // ser avisado por e-mail para dar Ctrl+Shift+R.
+  useEffect(() => {
+    const markTyped = () => { typedRef.current = true }
+    document.addEventListener('input', markTyped, true)
+
+    const stop = watchForNewVersion(() => {
+      if (typedRef.current) setUpdateReady(true)  // tem formulário em uso: pergunta
+      else window.location.reload()               // só navegação: troca na hora
+    })
+
+    return () => {
+      stop()
+      document.removeEventListener('input', markTyped, true)
+    }
+  }, [])
+
   if (loading) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center">
@@ -73,38 +96,47 @@ function App() {
     )
   }
 
-  // Link de recuperação expirado — volta para login com aviso
-  if (linkExpired) {
-    return <Login forceMode="expired" onExpiredDismiss={() => setLinkExpired(false)} />
-  }
-
-  // Fluxo de recuperação de senha — mostra formulário mesmo com sessão ativa
-  if (isRecovery) {
-    return <Login forceMode="reset" onResetDone={() => setIsRecovery(false)} />
-  }
-
-  if (!user) return <Login />
-
-  if (view === 'admin') {
-    return <Admin onBack={() => setView('dashboard')} />
-  }
-
-  if (view === 'ceo') {
-    return <CeoDashboard onBack={() => setView('dashboard')} />
-  }
-
-  if (view === 'logs') {
-    return <ActivityLog onBack={() => setView('dashboard')} />
-  }
-
   return (
-    <Dashboard
-      user={user}
-      onNavigateAdmin={() => { logActivity({ action: 'admin_access' }); setView('admin') }}
-      onNavigateCeo={()   => { logActivity({ action: 'ceo_access'   }); setView('ceo')   }}
-      onNavigateLogs={() => { logActivity({ action: 'log_access'    }); setView('logs')  }}
-    />
+    <>
+      {renderView()}
+      {updateReady && <UpdateToast />}
+    </>
   )
+
+  function renderView() {
+    // Link de recuperação expirado — volta para login com aviso
+    if (linkExpired) {
+      return <Login forceMode="expired" onExpiredDismiss={() => setLinkExpired(false)} />
+    }
+
+    // Fluxo de recuperação de senha — mostra formulário mesmo com sessão ativa
+    if (isRecovery) {
+      return <Login forceMode="reset" onResetDone={() => setIsRecovery(false)} />
+    }
+
+    if (!user) return <Login />
+
+    if (view === 'admin') {
+      return <Admin onBack={() => setView('dashboard')} />
+    }
+
+    if (view === 'ceo') {
+      return <CeoDashboard onBack={() => setView('dashboard')} />
+    }
+
+    if (view === 'logs') {
+      return <ActivityLog onBack={() => setView('dashboard')} />
+    }
+
+    return (
+      <Dashboard
+        user={user}
+        onNavigateAdmin={() => { logActivity({ action: 'admin_access' }); setView('admin') }}
+        onNavigateCeo={()   => { logActivity({ action: 'ceo_access'   }); setView('ceo')   }}
+        onNavigateLogs={() => { logActivity({ action: 'log_access'    }); setView('logs')  }}
+      />
+    )
+  }
 }
 
 export default App
