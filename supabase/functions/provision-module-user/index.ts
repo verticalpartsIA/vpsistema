@@ -1,17 +1,19 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { APPS } from '../_shared/apps.ts'
+import { appForModuleSlug } from '../_shared/apps.ts'
 
-// Disparada por um trigger em module_permissions (INSERT) — provisiona
-// automaticamente o usuário no app satélite assim que um admin concede
-// acesso, em vez de depender do primeiro clique em "Abrir sistema"
-// (que é quando o sso-proxy faria esse mesmo provisionamento hoje).
+// Disparada por um trigger em module_permissions e pelo invite-user —
+// provisiona o usuário no app satélite sem depender do primeiro clique em
+// "Abrir sistema" (que é quando o sso-proxy faria esse mesmo provisionamento).
+//
+// Regra de acesso vigente: todo colaborador ativo do portal acessa todos os
+// sistemas; a tabela module_permissions guarda apenas BLOQUEIOS explícitos
+// (can_access = false). Então aqui provisionamos quando NÃO há bloqueio.
 //
 // Sem verify_jwt: o Postgres não tem um JWT de usuário para enviar. Em vez
-// de um segredo compartilhado, a função reconfirma a permissão direto no
-// banco antes de agir — só provisiona o que já está de fato gravado em
-// module_permissions, então um payload forjado não provisiona ninguém que
-// não estivesse mesmo autorizado.
+// de um segredo compartilhado, a função reconfirma o estado direto no banco
+// antes de agir — só age conforme o que já está gravado em profiles /
+// module_permissions, então um payload forjado não libera ninguém.
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok')
 
@@ -42,10 +44,13 @@ serve(async (req: Request) => {
       return json({ ok: true, forwarded: 'vpclick', ...body })
     }
 
-    const app = APPS[moduleSlug]
+    // O slug do módulo não é a chave do mapa APPS (que é o hostname), daí a
+    // busca por moduleSlug — antes APPS[moduleSlug] não achava "vpposvenda360"
+    // nem "cotacao-importacao" e a função saía como "skipped".
+    const app = appForModuleSlug(moduleSlug)
     if (!app || app.ssoType !== 'magiclink') {
-      // Demais apps token-based (catraca, propostas, vpgestaoimportacao) não
-      // têm Supabase Auth próprio — nada a provisionar.
+      // Demais apps token-based (catraca, propostas, engenharia, suporte,
+      // vpgestaoimportacao) não têm Supabase Auth próprio — nada a provisionar.
       return json({ ok: true, skipped: true })
     }
 
@@ -54,13 +59,14 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     )
 
-    const { data: perm } = await vpsistema
+    const { data: block } = await vpsistema
       .from('module_permissions')
       .select('user_id')
       .eq('user_id', userId)
       .eq('module_slug', moduleSlug)
+      .eq('can_access', false)
       .maybeSingle()
-    if (!perm) return json({ error: 'Permissão não encontrada' }, 404)
+    if (block) return json({ ok: true, blocked: true })
 
     const { data: profile, error: profileErr } = await vpsistema
       .from('profiles')

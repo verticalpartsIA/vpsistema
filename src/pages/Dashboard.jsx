@@ -11,7 +11,7 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   const [profile,  setProfile]  = useState(null)
   const [loading,  setLoading]  = useState(true)
   const [blocked,  setBlocked]  = useState(null)  // módulo que o user tentou acessar sem permissão
-  const [userPerms, setUserPerms] = useState(null) // null = acesso pleno
+  const [blockedSlugs, setBlockedSlugs] = useState([]) // módulos bloqueados p/ este user
 
   useEffect(() => {
     async function load() {
@@ -31,22 +31,25 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
         .order('sort_order')
       setModules(mods || [])
 
-      // Permissões individuais do usuário
-      // Se não há entradas = acesso pleno (padrão)
-      const { data: perms } = await supabase
+      // Bloqueios individuais do usuário.
+      // Todo colaborador cadastrado acessa todos os sistemas por padrão — a
+      // tabela module_permissions só guarda exceções (can_access = false).
+      // Antes ela funcionava como allow-list: quem tinha qualquer linha ficava
+      // trancado fora de tudo que não estivesse marcado.
+      const { data: blocks } = await supabase
         .from('module_permissions')
         .select('module_slug')
         .eq('user_id', user.id)
+        .eq('can_access', false)
 
-      setUserPerms(perms && perms.length > 0 ? perms.map(p => p.module_slug) : null)
+      setBlockedSlugs((blocks || []).map(b => b.module_slug))
       setLoading(false)
     }
     load()
   }, [user])
 
   function canAccess(slug) {
-    if (userPerms === null) return true          // sem restrições = pleno
-    return userPerms.includes(slug)
+    return !blockedSlugs.includes(slug)
   }
 
   async function handleModuleClick(mod) {

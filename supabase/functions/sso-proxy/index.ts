@@ -27,13 +27,13 @@ serve(async (req: Request) => {
 
     const { targetApp } = await req.json()
     const app = APPS[targetApp]
-    if (!app) return json({ error: 'Unknown app' }, 400)
 
     // ── Controle de acesso por módulo (server-side) ──
     // O bloqueio no Dashboard é só de UI: sem esta verificação, qualquer usuário
     // autenticado podia chamar a função direto e obter SSO para qualquer app.
-    // Espelha a regra do front: sem linhas em module_permissions = acesso pleno;
-    // com linhas, o slug do módulo precisa estar entre elas.
+    // Espelha a regra do front: TODO colaborador cadastrado acessa TODOS os
+    // sistemas; só fica de fora quem tem bloqueio explícito
+    // (module_permissions.can_access = false) para aquele módulo.
     // O slug da permissão NEM SEMPRE é igual ao targetApp (ex.: vpclick→click,
     // posvenda360→vpposvenda360), então mapeamos pelo hostname da tabela modules.
     const vpAdmin = createClient(
@@ -50,14 +50,14 @@ serve(async (req: Request) => {
       return json({ error: 'Módulo indisponível' }, 400)
     }
 
-    const { data: perms } = await vpsistema
+    const { data: blocks } = await vpsistema
       .from('module_permissions')
       .select('module_slug')
       .eq('user_id', user.id)
+      .eq('can_access', false)
 
-    const hasRestrictions = Array.isArray(perms) && perms.length > 0
-    const allowed = !hasRestrictions || perms!.some((p) => p.module_slug === mod.slug)
-    if (!allowed) {
+    const blocked = (blocks ?? []).some((p) => p.module_slug === mod.slug)
+    if (blocked) {
       return json({ error: 'Você não tem permissão para acessar este sistema.' }, 403)
     }
 
@@ -68,10 +68,14 @@ serve(async (req: Request) => {
       .single()
     logEnter(targetApp, user.email, prof?.name)
 
-    // Token-based SSO: pass vpsistema JWT directly as ?sso_token=
-    if (app.ssoType === 'token') {
+    // Token-based SSO: pass vpsistema JWT directly as ?sso_token=.
+    // Módulo sem entrada em APPS cai aqui também, usando a URL cadastrada em
+    // `modules` — antes isso virava "Unknown app" (400), o Dashboard abria a
+    // URL crua sem sessão e o subsistema devolvia o usuário ao login.
+    if (!app || app.ssoType === 'token') {
       const token = authHeader.replace('Bearer ', '')
-      return json({ actionLink: `${app.redirectTo}?sso_token=${encodeURIComponent(token)}` })
+      const base = app?.ssoType === 'token' ? app.redirectTo : mod.url
+      return json({ actionLink: withToken(base, token) })
     }
 
     // Magic link SSO: generate Supabase Auth link for the target app
@@ -122,6 +126,19 @@ function json(body: unknown, status = 200) {
     status,
     headers: { ...CORS, 'Content-Type': 'application/json' },
   })
+}
+
+// Acrescenta ?sso_token= preservando a query que a URL do módulo já tenha
+// (ex.: vprequisicoes cadastrado como .../login?redirect=%2F).
+function withToken(url: string, token: string): string {
+  try {
+    const u = new URL(url)
+    u.searchParams.set('sso_token', token)
+    return u.toString()
+  } catch {
+    const sep = url.includes('?') ? '&' : '?'
+    return `${url}${sep}sso_token=${encodeURIComponent(token)}`
+  }
 }
 
 // Primeiro rótulo do hostname de uma URL de módulo (ex.: "posvenda360" de
