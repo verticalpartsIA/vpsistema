@@ -109,6 +109,19 @@ vpsistema.com
 
 **Domínios com SSO ativo:** `*.vpsistema.com`, `*.verticalparts.com`
 
+Os apps satélites estão mapeados em `supabase/functions/_shared/apps.ts`, com a
+chave igual ao primeiro rótulo do hostname do módulo (`posvenda360`, `vpclick`,
+`vpgestaoimportacao`…) e o `moduleSlug` correspondente na tabela `modules`:
+
+| Tipo        | Apps                                                                    | Como autentica                                  |
+|-------------|-------------------------------------------------------------------------|-------------------------------------------------|
+| `token`     | catraca, vpclick, propostas, vpgestaoimportacao, engenharia, suporte     | recebe o JWT do portal em `?sso_token=`         |
+| `magiclink` | visitas, vprequisicoes, posvenda360                                     | Auth próprio — usuário é provisionado + magic link |
+
+Módulo sem entrada no mapa não quebra mais: o `sso-proxy` usa a URL cadastrada
+em `modules` e anexa o `?sso_token=` (antes respondia `Unknown app` e o portal
+abria a URL crua, sem sessão — o "dá reload" relatado pelos colaboradores).
+
 ---
 
 ## Banco de Dados (Supabase `ubdkoqxfwcraftesgmbw`)
@@ -125,9 +138,21 @@ vpsistema.com
 ### Lógica de permissões
 
 ```
-Se não há linhas em module_permissions para o usuário → acesso pleno a todos os módulos
-Se há linhas → o usuário vê apenas os slugs listados
+Todo colaborador cadastrado e ativo acessa TODOS os módulos ativos.
+module_permissions guarda apenas EXCEÇÕES: uma linha com can_access = false
+bloqueia aquele módulo para aquele usuário.
 ```
+
+No modal **Permissões** do Admin, os checkboxes vêm todos marcados — o admin
+desmarca só o que a pessoa **não** deve acessar, e o portal grava um bloqueio.
+
+> Até 29/07/2026 a tabela funcionava como *allow-list*: qualquer linha existente
+> transformava tudo o que não estivesse marcado em acesso negado. Como o modal
+> salva a lista inteira de uma vez, colaboradores acabavam trancados fora de
+> sistemas que ninguém pretendeu bloquear. As 163 linhas de liberação antigas
+> foram removidas (backup em `module_permissions_backup_20260729`) e a regra
+> passou a ser "libera por padrão, bloqueia por exceção" no Dashboard, no
+> `sso-proxy` e no `confirm-permission`.
 
 ---
 

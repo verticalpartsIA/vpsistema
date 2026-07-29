@@ -32,15 +32,20 @@ serve(async (req: Request) => {
       .maybeSingle()
     if (profileErr || !profile?.email) return json({ error: 'Perfil não encontrado' }, 404)
 
-    const { data: perm } = await vpsistema
+    // Acesso liberado por padrão para todo colaborador ativo do portal — só
+    // não tem permissão quem foi bloqueado explicitamente naquele módulo
+    // (can_access = false). Antes exigia uma linha de liberação, então quem
+    // não estivesse na allow-list era desativado no satélite.
+    const { data: block } = await vpsistema
       .from('module_permissions')
       .select('user_id')
       .eq('user_id', userId)
       .eq('module_slug', moduleSlug)
+      .eq('can_access', false)
       .maybeSingle()
 
     return json({
-      has_permission: !!perm && profile.is_active !== false,
+      has_permission: !block && profile.is_active !== false,
       profile: {
         email: profile.email,
         name: profile.name,

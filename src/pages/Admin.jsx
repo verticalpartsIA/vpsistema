@@ -77,9 +77,10 @@ export default function Admin({ onBack }) {
   // Feedback inline
   const [actionMsg, setActionMsg] = useState(null)
 
-  // Mapa de permissões: { [userId]: string[] | 'full' }
-  // 'full' = acesso total (sem linhas no banco)
-  const [permsMap, setPermsMap] = useState({})
+  // Mapa de BLOQUEIOS: { [userId]: string[] }
+  // Sem entrada (ou array vazio) = acesso total. O acesso é liberado por
+  // padrão para todo colaborador; module_permissions só guarda exceções.
+  const [blocksMap, setBlocksMap] = useState({})
 
   useEffect(() => { loadAll() }, [])
 
@@ -88,27 +89,27 @@ export default function Admin({ onBack }) {
     const [{ data: u }, { data: m }, { data: allPerms }] = await Promise.all([
       supabase.from('profiles').select('*').order('name'),
       supabase.from('modules').select('*').eq('is_active', true).order('sort_order'),
-      supabase.from('module_permissions').select('user_id, module_slug'),
+      supabase.from('module_permissions').select('user_id, module_slug, can_access'),
     ])
     setUsers(u || [])
     setModules(m || [])
 
-    // Agrupa permissões por user_id
+    // Agrupa BLOQUEIOS por user_id (linhas can_access = false). Linhas antigas
+    // com can_access = true são liberações redundantes — todo mundo já acessa
+    // tudo por padrão — e por isso são ignoradas aqui.
     const map = {}
     for (const p of (allPerms || [])) {
+      if (p.can_access !== false) continue
       if (!map[p.user_id]) map[p.user_id] = []
       map[p.user_id].push(p.module_slug)
     }
-    setPermsMap(map)
+    setBlocksMap(map)
     setLoading(false)
   }
 
-  /** Retorna slugs permitidos para exibição inline.
-   *  null  = acesso total (sem entradas no banco)
-   *  []    = sem acesso
-   *  [...] = slugs restritos */
-  function getUserSlugs(userId) {
-    return permsMap.hasOwnProperty(userId) ? permsMap[userId] : null
+  /** Slugs bloqueados para o colaborador ([] = acesso a todos os sistemas). */
+  function getUserBlocked(userId) {
+    return blocksMap[userId] || []
   }
 
   async function toggleActive(u) {
@@ -178,18 +179,19 @@ export default function Admin({ onBack }) {
     setPermMsg(null)
     setPermLoading(true)
 
-    const { data: perms } = await supabase
+    const { data: blocks } = await supabase
       .from('module_permissions')
       .select('module_slug')
       .eq('user_id', u.id)
+      .eq('can_access', false)
 
-    if (perms && perms.length > 0) {
-      setPermFull(false)
-      setPermSlugs(perms.map(p => p.module_slug))
-    } else {
-      setPermFull(true)
-      setPermSlugs([])
-    }
+    const blockedSlugs = (blocks || []).map(b => b.module_slug)
+    const allSlugs = modules.map(m => m.slug)
+
+    // Os checkboxes mostram os sistemas LIBERADOS: tudo marcado, menos os
+    // bloqueios explícitos. Sem bloqueio = acesso total.
+    setPermFull(blockedSlugs.length === 0)
+    setPermSlugs(allSlugs.filter(s => !blockedSlugs.includes(s)))
     setPermLoading(false)
   }
 
@@ -201,7 +203,10 @@ export default function Admin({ onBack }) {
 
   function toggleFullAccess(checked) {
     setPermFull(checked)
-    if (checked) setPermSlugs([])
+    // Marcar "acesso total" religa todos os sistemas; desmarcar mantém a
+    // seleção atual (que começa com tudo liberado) para o admin tirar só o
+    // que quiser bloquear.
+    if (checked) setPermSlugs(modules.map(m => m.slug))
   }
 
   async function savePerms() {
@@ -220,16 +225,23 @@ export default function Admin({ onBack }) {
       return
     }
 
-    // 2. Sincroniza module_permissions
-    // Apaga todas as permissões existentes do usuário
+    // 2. Sincroniza module_permissions — que agora guarda só BLOQUEIOS.
+    // Apaga o que existir do usuário e regrava apenas os sistemas desmarcados.
     await supabase
       .from('module_permissions')
       .delete()
       .eq('user_id', permUser.id)
 
-    // Se não é acesso pleno, insere os slugs marcados
-    if (!permFull && permSlugs.length > 0) {
-      const rows = permSlugs.map(slug => ({ user_id: permUser.id, module_slug: slug }))
+    const blockedSlugs = permFull
+      ? []
+      : modules.map(m => m.slug).filter(s => !permSlugs.includes(s))
+
+    if (blockedSlugs.length > 0) {
+      const rows = blockedSlugs.map(slug => ({
+        user_id: permUser.id,
+        module_slug: slug,
+        can_access: false,
+      }))
       const { error: insertErr } = await supabase
         .from('module_permissions')
         .insert(rows)
@@ -246,19 +258,22 @@ export default function Admin({ onBack }) {
       p.id === permUser.id ? { ...p, level: permLevel } : p
     ))
 
-    // Atualiza o permsMap local para refletir na tabela imediatamente
-    setPermsMap(prev => {
+    // Atualiza o mapa local de bloqueios para refletir na tabela imediatamente
+    setBlocksMap(prev => {
       const next = { ...prev }
-      if (permFull || permSlugs.length === 0) {
-        // Acesso pleno: remove entrada do mapa
-        delete next[permUser.id]
-      } else {
-        next[permUser.id] = [...permSlugs]
-      }
+      if (blockedSlugs.length === 0) delete next[permUser.id]
+      else next[permUser.id] = blockedSlugs
       return next
     })
 
-    logActivity({ action: 'change_permissions', target: permUser.name || permUser.email, details: { nivel: permLevel, acesso: permFull ? 'pleno' : permSlugs.join(', ') || 'nenhum' } })
+    logActivity({
+      action: 'change_permissions',
+      target: permUser.name || permUser.email,
+      details: {
+        nivel: permLevel,
+        acesso: blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
+      },
+    })
     setPermMsg({ type: 'success', text: 'Permissões salvas com sucesso!' })
     setPermSaving(false)
     setTimeout(() => {
@@ -734,20 +749,16 @@ export default function Admin({ onBack }) {
                       {/* Ícones de acesso inline */}
                       <td className="px-4 py-4 hidden lg:table-cell">
                         {(() => {
-                          const slugs = getUserSlugs(u.id)
+                          const blockedSlugs = getUserBlocked(u.id)
 
-                          // Sem conta de login: "acesso pleno" (ausência de linhas)
-                          // não significa nada de verdade ainda, então só mostra
-                          // ícones se algum admin já pré-configurou módulos
-                          // específicos via Permissões — o resto continua "pendente"
-                          // até a pessoa ganhar um e-mail/login de verdade.
-                          if (u.is_placeholder && slugs === null) {
+                          // Sem conta de login ainda: o acesso liberado por
+                          // padrão não vale de nada até a pessoa ter e-mail/login,
+                          // então marca como pendente em vez de listar tudo.
+                          if (u.is_placeholder && blockedSlugs.length === 0) {
                             return <span className="text-xs text-slate-600 italic">Sem acesso definido</span>
                           }
 
-                          const visibleMods = slugs === null
-                            ? modules
-                            : modules.filter(m => slugs.includes(m.slug))
+                          const visibleMods = modules.filter(m => !blockedSlugs.includes(m.slug))
 
                           if (visibleMods.length === 0) {
                             return (
@@ -865,6 +876,10 @@ export default function Admin({ onBack }) {
                   <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
                     Acesso aos Sistemas
                   </label>
+                  <p className="text-slate-500 text-xs mb-3 leading-relaxed">
+                    Todo colaborador cadastrado entra em todos os sistemas por padrão.
+                    Desmarque apenas o que este colaborador <strong className="text-slate-400">não</strong> deve acessar.
+                  </p>
 
                   {/* Toggle acesso total */}
                   <label className="flex items-center gap-3 p-3 rounded-lg border border-brand/40 bg-brand/5 cursor-pointer mb-3">
@@ -931,8 +946,8 @@ export default function Admin({ onBack }) {
                   )}
 
                   {!permFull && permSlugs.length === 0 && (
-                    <p className="text-slate-500 text-xs mt-2 italic">
-                      Nenhum sistema selecionado — o colaborador não terá acesso a nenhum sistema.
+                    <p className="text-red-400 text-xs mt-2 italic">
+                      Nenhum sistema marcado — o colaborador ficará bloqueado em todos os sistemas.
                     </p>
                   )}
                 </div>
