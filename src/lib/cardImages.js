@@ -1,15 +1,17 @@
 // Mapeamento de imagens de fundo para cada card do dashboard
-// Fotos: escadas/rolantes com estética industrial — tema VerticalParts
+// Fotos: escadas/rolantes com estética industrial — tema VerticalParts.
+// WebP em 800px: os originais eram JPEG de até 6000px (20 MB no total) para
+// preencher um card de ~300px coberto por 65% de preto.
 
 const IMAGES = [
-  '/images/daniel-dalea-bKI9DEtOqg8-unsplash.jpg',    // 0 – escada rolante azul, noturna
-  '/images/declan-sun-b4fUGkKLEcw-unsplash.jpg',      // 1 – escadas cruzadas, aço cinza
-  '/images/escadas.jpg',                               // 2 – shopping, perspectiva ampla
-  '/images/francisco-delgado-1RUNbHofhYQ-unsplash.jpg',// 3 – escada rolante moderna
-  '/images/julien-andrieux-KnAH5pNJ58Y-unsplash.jpg', // 4 – escada ao céu aberto
-  '/images/omar-prestwich-U6XW6BeKuyI-unsplash.jpg',  // 5 – escada rolante branca
-  '/images/ricardo-gomez-angel-U_riwEM5piM-unsplash.jpg',// 6 – átrio com skylight dourado
-  '/images/scott-stefan-x_MaD-3TU2c-unsplash.jpg',   // 7 – escadas cruzadas com neon
+  '/images/daniel-dalea-bKI9DEtOqg8-unsplash.webp',    // 0 – escada rolante azul, noturna
+  '/images/declan-sun-b4fUGkKLEcw-unsplash.webp',      // 1 – escadas cruzadas, aço cinza
+  '/images/escadas.webp',                               // 2 – shopping, perspectiva ampla
+  '/images/francisco-delgado-1RUNbHofhYQ-unsplash.webp',// 3 – escada rolante moderna
+  '/images/julien-andrieux-KnAH5pNJ58Y-unsplash.webp', // 4 – escada ao céu aberto
+  '/images/omar-prestwich-U6XW6BeKuyI-unsplash.webp',  // 5 – escada rolante branca
+  '/images/ricardo-gomez-angel-U_riwEM5piM-unsplash.webp',// 6 – átrio com skylight dourado
+  '/images/scott-stefan-x_MaD-3TU2c-unsplash.webp',   // 7 – escadas cruzadas com neon
 ]
 
 // Cards admin (fixos no topo do dashboard)
