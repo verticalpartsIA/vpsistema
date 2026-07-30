@@ -99,16 +99,20 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
       let finalUrl = mod.url
       if (!error && data?.actionLink) {
         finalUrl = data.actionLink
-        // SSO por token: a edge function só consegue devolver o access_token
-        // (ele vem no header Authorization). O refresh_token existe apenas no
-        // cliente — sem ele, o setSession() do subsistema falha e o guard
-        // redireciona de volta ao portal (o "reload" relatado pelos usuários).
-        if (finalUrl.includes('sso_token=') && !finalUrl.includes('sso_refresh=')) {
-          const { data: { session } } = await supabase.auth.getSession()
-          if (session?.refresh_token) {
-            finalUrl += `&sso_refresh=${encodeURIComponent(session.refresh_token)}`
-          }
-        }
+        // Removido: este bloco anexava sso_refresh sempre que a URL continha
+        // "sso_token=" — mas essa string só aparece no link dos apps TOKEN
+        // (Catraca, Propostas, VP Click, Engenharia, Suporte, Cotação
+        // Importação), que por design verificam o JWT direto no servidor e
+        // nunca pediram refresh_token (ver _shared/apps.ts). O link dos apps
+        // MAGICLINK vem de generateLink() do Supabase — usa o parâmetro
+        // "token", não "sso_token" — então essa condição nunca era
+        // verdadeira pra eles, apesar do comentário original dizer o
+        // contrário. Na prática, o código sempre injetou um parâmetro extra
+        // e não pedido nos apps TOKEN — inofensivo se o satélite ignora
+        // parâmetros desconhecidos, mas explica o "reload" no Propostas se
+        // o front dele tentar consumir esse refresh_token (que pertence ao
+        // projeto Supabase do vpsistema, não ao dele) como se fosse iniciar
+        // uma sessão local.
       }
 
       // Se a aba inicial foi bloqueada (win null) e a segunda tentativa também
