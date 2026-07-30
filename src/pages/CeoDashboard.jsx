@@ -4,10 +4,27 @@ import { DEPARTMENTS } from './Admin'
 import {
   ArrowLeft, Loader2, BarChart2, Clock, LogIn, LogOut, Monitor,
   UserPlus, Shield, ClipboardList, Activity as ActivityIcon, RefreshCw,
-  ChevronRight, ChevronDown, Star
+  ChevronRight, ChevronDown, Star, AlertTriangle
 } from 'lucide-react'
 
 const LEVEL_RANK = { Administrador: 0, Lider: 1, Colaborador: 2 }
+
+// Antes a tela buscava só os últimos 300 registros de cada tabela, sem
+// filtro de data — com o volume atual isso cobria ~49h (pouco mais de 2
+// dias) de um histórico de 4 meses, sem avisar. Um departamento sumia da
+// lista e não dava para saber se ele não acessou nada ou se caiu fora da
+// janela. Agora o período é explícito e a busca filtra por data no banco,
+// não por "os N mais recentes" — a cobertura real fica visível sempre.
+const PERIODS = [
+  { key: 'hoje',  label: 'Hoje',    days: 1  },
+  { key: '7d',    label: '7 dias',  days: 7  },
+  { key: '30d',   label: '30 dias', days: 30 },
+]
+// Teto de segurança por tabela — não é "os N mais recentes" (isso escondia
+// a janela real); é só um limite superior para não travar o navegador se
+// um período muito longo trouxer volume anormal. 30 dias hoje traz ~5 mil
+// linhas por tabela, então 8 mil dá folga sem risco de silenciar dados.
+const SAFETY_CAP = 8000
 
 const APP_LABELS = {
   vpsistema:          'vpsistema',
@@ -108,6 +125,10 @@ function Timeline() {
   const [items, setItems] = useState([])
   const [profileByEmail, setProfileByEmail] = useState(new Map())
   const [loading, setLoading] = useState(true)
+  const [period, setPeriod] = useState('7d')
+  // Se algum lado bateu no teto de segurança, a janela pode conter mais
+  // eventos do que os carregados — precisa ficar visível, não escondido.
+  const [truncated, setTruncated] = useState(false)
   const [expandedDepts, setExpandedDepts] = useState(new Set())
   const [expandedUsers, setExpandedUsers] = useState(new Set())
   const [expandedDates, setExpandedDates] = useState(new Set())
@@ -136,18 +157,23 @@ function Timeline() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    const days = PERIODS.find(p => p.key === period)?.days ?? 7
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString()
+    // Filtra por data no banco (.gte), não por "os N mais recentes" — assim a
+    // cobertura é o período escolhido, não um corte arbitrário de linhas.
     const [logsRes, eventsRes, profilesRes] = await Promise.all([
-      sbPortal.from('activity_logs').select('*').order('criado_em', { ascending: false }).limit(300),
-      sbPortal.from('activity_events').select('*').order('criado_em', { ascending: false }).limit(300),
+      sbPortal.from('activity_logs').select('*').gte('criado_em', cutoff).order('criado_em', { ascending: false }).limit(SAFETY_CAP),
+      sbPortal.from('activity_events').select('*').gte('criado_em', cutoff).order('criado_em', { ascending: false }).limit(SAFETY_CAP),
       sbPortal.from('profiles').select('email, name, department, level, is_department_lead, is_active'),
     ])
     const logs   = (logsRes.data   || []).map(l => ({ ...l, kind: 'log' }))
     const events = (eventsRes.data || []).map(e => ({ ...e, kind: 'event' }))
     const merged = [...logs, ...events].sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
     setItems(merged)
+    setTruncated(logs.length >= SAFETY_CAP || events.length >= SAFETY_CAP)
     setProfileByEmail(new Map((profilesRes.data || []).map(p => [(p.email || '').toLowerCase(), p])))
     setLoading(false)
-  }, [])
+  }, [period])
 
   useEffect(() => { load() }, [load])
 
@@ -155,12 +181,45 @@ function Timeline() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-slate-400 text-sm">Rastro de acesso e navegação entre todos os sistemas, por departamento e colaborador.</p>
-        <button onClick={load} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Atualizar">
-          <RefreshCw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Período explícito: antes a tela buscava "os 300 mais recentes"
+              sem dizer quanto tempo isso cobria (podia ser só 2 dias de um
+              histórico de 4 meses). Agora quem olha escolhe a janela e sabe
+              exatamente o que está vendo. */}
+          <div className="flex items-center bg-surface-card border border-surface-border rounded-lg p-1">
+            {PERIODS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  period === p.key ? 'bg-brand text-surface' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={load} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Atualizar">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {!loading && (
+        <p className="text-slate-500 text-xs -mt-4">
+          Mostrando <span className="text-slate-300 font-medium">{items.length}</span> evento{items.length === 1 ? '' : 's'} — período: <span className="text-slate-300 font-medium">{PERIODS.find(p => p.key === period)?.label}</span>.
+          {' '}Departamento ou colaborador ausente aqui não teve atividade neste período.
+        </p>
+      )}
+
+      {truncated && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          Este período tem mais eventos do que os carregados aqui. Reduza para "Hoje" ou "7 dias" para ver a lista completa.
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
