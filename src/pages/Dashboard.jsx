@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { LogOut, User, Loader2, Lock, X, Users, BarChart2, ClipboardList } from 'lucide-react'
+import { LogOut, User, Loader2, Lock, X, Users, BarChart2, ClipboardList, ExternalLink } from 'lucide-react'
 import ModuleCard from '../components/ModuleCard'
 import { logActivity } from '../lib/activityLog'
 import { ADMIN_CARD_IMAGES } from '../lib/cardImages'
@@ -12,6 +12,10 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   const [loading,  setLoading]  = useState(true)
   const [blocked,  setBlocked]  = useState(null)  // módulo que o user tentou acessar sem permissão
   const [blockedSlugs, setBlockedSlugs] = useState([]) // módulos bloqueados p/ este user
+  // Pop-up bloqueado pelo navegador (antivírus corporativo, política restritiva)
+  // e nenhuma aba abriu: guarda o link certo pra pessoa clicar manualmente,
+  // em vez do clique não fazer nada visível.
+  const [openFailed, setOpenFailed] = useState(null) // { name, url }
 
   useEffect(() => {
     async function load() {
@@ -52,6 +56,19 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
     return !blockedSlugs.includes(slug)
   }
 
+  // Tenta abrir url numa aba nova; devolve false se o navegador bloqueou
+  // (window.open retorna null, ou lança em alguns navegadores mais estritos).
+  // Chamado depois de um await NUNCA é garantia de abrir — só o primeiro
+  // window.open dentro do próprio clique conta como gesto do usuário para
+  // a maioria dos bloqueadores de pop-up.
+  function tryOpen(url) {
+    try {
+      return !!window.open(url, '_blank', 'noopener')
+    } catch (_) {
+      return false
+    }
+  }
+
   async function handleModuleClick(mod) {
     if (!canAccess(mod.slug)) {
       setBlocked(mod)
@@ -64,7 +81,7 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
     const SSO_DOMAINS = ['vpsistema.com', 'verticalparts.com']
     const isSSO = mod.url && SSO_DOMAINS.some(d => mod.url.includes(d))
     if (!isSSO) {
-      window.open(mod.url, '_blank', 'noopener')
+      if (!tryOpen(mod.url)) setOpenFailed({ name: mod.name, url: mod.url })
       return
     }
 
@@ -94,12 +111,16 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
         }
       }
 
-      if (win) win.location.href = finalUrl
-      else window.open(finalUrl, '_blank', 'noopener')
+      // Se a aba inicial foi bloqueada (win null) e a segunda tentativa também
+      // falhar — provável, ela roda fora do gesto de clique original — a pessoa
+      // fica sem nenhum feedback. Mostra o link certo pra abrir manualmente:
+      // um clique de verdade da pessoa nunca é bloqueado.
+      if (win && !win.closed) win.location.href = finalUrl
+      else if (!tryOpen(finalUrl)) setOpenFailed({ name: mod.name, url: finalUrl })
     } catch (_) {
       // Falha ao gerar SSO — abre a URL direta na aba já aberta.
-      if (win) win.location.href = mod.url
-      else window.open(mod.url, '_blank', 'noopener')
+      if (win && !win.closed) win.location.href = mod.url
+      else if (!tryOpen(mod.url)) setOpenFailed({ name: mod.name, url: mod.url })
     }
   }
 
@@ -307,6 +328,41 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: navegação bloqueada pelo navegador (pop-up) */}
+      {openFailed && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 max-w-sm w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                <ExternalLink className="w-6 h-6 text-amber-400" />
+              </div>
+              <button onClick={() => setOpenFailed(null)}
+                      className="text-slate-500 hover:text-white transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <h2 className="text-white font-bold text-lg mb-2">Não foi possível abrir automaticamente</h2>
+            <p className="text-slate-400 text-sm leading-relaxed mb-1">
+              O navegador bloqueou a abertura de
+            </p>
+            <p className="text-brand font-medium text-sm mb-6">{openFailed.name}</p>
+            <p className="text-slate-500 text-sm mb-6">
+              Costuma ser bloqueio de pop-up (antivírus corporativo ou configuração do navegador). Clique no botão abaixo para abrir manualmente.
+            </p>
+            <a
+              href={openFailed.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setOpenFailed(null)}
+              className="block w-full text-center bg-brand hover:bg-brand-dark text-surface
+                         font-bold rounded-lg py-2.5 text-sm transition-colors"
+            >
+              Abrir {openFailed.name}
+            </a>
           </div>
         </div>
       )}

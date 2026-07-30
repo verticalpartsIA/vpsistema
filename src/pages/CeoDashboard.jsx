@@ -34,6 +34,16 @@ function slugify(s) {
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+// `.test` \u00e9 dom\u00ednio reservado pra teste (RFC 2606) \u2014 o pr\u00f3prio VP Click j\u00e1
+// usa isso pros testes automatizados dele (ci.collab@vpclick.test, achado
+// batendo os dados: 80 chamadas em 4 dias, todas dentro da janela padr\u00e3o).
+// Um executivo olhando a timeline n\u00e3o deveria ver "CI Colaborador" ao lado
+// de gente de verdade. N\u00e3o \u00e9 sobre avisar que o dado est\u00e1 incompleto \u2014 \u00e9
+// sobre esse tr\u00e1fego nunca deveria aparecer na vis\u00e3o executiva.
+function isTestTraffic(email) {
+  return /\.test$/i.test(email || '')
+}
+
 const APP_LABELS = {
   vpsistema:          'vpsistema',
   vprequisicoes:      'VPRequisições',
@@ -150,7 +160,12 @@ function groupByDeptAndUser(items, profileByEmail) {
     const profile = profileByEmail.get((u.user_email || '').toLowerCase())
     const dept = profile && profile.is_active === false ? 'Inativos' : (profile?.department || 'Sem departamento')
     if (!groupsByDept.has(dept)) groupsByDept.set(dept, [])
-    groupsByDept.get(dept).push({ ...u, profile })
+    // O nome exibido prefere o cadastro (profiles.name) ao nome gravado no
+    // evento: alguns eventos foram gravados com o e-mail dentro do campo
+    // nome na origem, e a Timeline pegava o evento mais recente de cada
+    // pessoa — se esse evento malformado fosse o mais recente, a pessoa
+    // inteira aparecia pelo e-mail mesmo com o cadastro correto.
+    groupsByDept.get(dept).push({ ...u, profile, user_name: profile?.name || u.user_name })
   }
   const deptOrder = [...DEPARTMENTS, 'Inativos', 'Sem departamento']
   return [
@@ -224,8 +239,8 @@ function Timeline() {
       sbPortal.from('activity_events').select('*').gte('criado_em', cutoff).order('criado_em', { ascending: false }).limit(SAFETY_CAP),
       sbPortal.from('profiles').select('email, name, department, level, is_department_lead, is_active'),
     ])
-    const logs   = (logsRes.data   || []).map(l => ({ ...l, kind: 'log' }))
-    const events = (eventsRes.data || []).map(e => ({ ...e, kind: 'event' }))
+    const logs   = (logsRes.data   || []).filter(l => !isTestTraffic(l.user_email)).map(l => ({ ...l, kind: 'log' }))
+    const events = (eventsRes.data || []).filter(e => !isTestTraffic(e.user_email)).map(e => ({ ...e, kind: 'event' }))
     const merged = [...logs, ...events].sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
     setItems(merged)
     setTruncated(logs.length >= SAFETY_CAP || events.length >= SAFETY_CAP)
