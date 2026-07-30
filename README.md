@@ -278,6 +278,28 @@ Node:         18.x
 > repositório ser renomeado para `001_vpsistema` e não pôde ser
 > reconectada pela interface.
 
+### Cache — por que ninguém precisa dar Ctrl+Shift+R
+
+`public/.htaccess` (copiado para `dist/` no build) já aplica a estratégia padrão
+de SPA:
+
+| Arquivo             | Cache-Control                  | Por quê                                      |
+|---------------------|--------------------------------|----------------------------------------------|
+| `assets/index-*.js` / `*.css` | 1 ano                | o hash está no nome — build novo, nome novo  |
+| `index.html`        | `no-store, must-revalidate`    | é ele que aponta para o hash da vez          |
+
+Ou seja: qualquer **carregamento novo** — F5 comum, abrir o portal, voltar no dia
+seguinte — já baixa a versão nova. Recarga forçada nunca é necessária.
+
+O único caso que header nenhum resolve é a **aba que ficou aberta** desde antes
+do deploy: aquele JS já está na memória. Para isso, `src/lib/versionWatch.js`
+compara o bundle em execução com o que o `index.html` anuncia (a cada 5 min e
+sempre que o colaborador volta para a aba) e:
+
+- **nada digitado na tela** → recarrega sozinho, sem avisar
+- **formulário em uso** (convite, edição de nome) → mostra o `UpdateToast` com
+  o botão "Atualizar", para não jogar fora o que estava sendo preenchido
+
 **Variáveis de ambiente no Hostinger:**
 ```
 VITE_SUPABASE_URL=https://ubdkoqxfwcraftesgmbw.supabase.co
