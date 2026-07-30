@@ -118,9 +118,9 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
       <header className="bg-white border-b border-neutral-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
 
-          <div className="flex items-center gap-3">
+          {/* Só a imagem: o logo já traz a marca escrita, o texto ao lado repetia. */}
+          <div className="flex items-center">
             <img src="/logo-color.png" alt="VerticalParts" className="h-8 object-contain" />
-            <span className="text-neutral-900 font-bold text-lg tracking-wide">VerticalParts</span>
           </div>
 
           <div className="flex items-center gap-4">
