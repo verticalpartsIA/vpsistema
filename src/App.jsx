@@ -10,6 +10,10 @@ import { watchForNewVersion } from './lib/versionWatch'
 import UpdateToast from './components/UpdateToast'
 import { Loader2 } from 'lucide-react'
 
+// Marca de "esta aba já esteve logada" — só um booleano, some ao fechar a aba.
+// Serve para explicar a volta ao login; a sessão em si continua sem persistir.
+const SESSION_FLAG = 'vp_sessao_ativa'
+
 function App() {
   const [user,       setUser]       = useState(null)
   const [loading,    setLoading]    = useState(true)
@@ -17,6 +21,11 @@ function App() {
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
+  // Sessão caiu sem a pessoa ter clicado em "Sair" (refresh de token falhou,
+  // rede oscilou, aba ficou suspensa). A sessão não é persistida por decisão
+  // de segurança, então não dá para recuperá-la — mas dá para explicar.
+  const [sessionLost, setSessionLost] = useState(false)
+  const signingOutRef = useRef(false)
   // Alguém digitou algo nesta aba? Se sim, recarregar sozinho jogaria fora um
   // convite ou uma edição em andamento.
   const typedRef = useRef(false)
@@ -40,6 +49,13 @@ function App() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       loggedUserIdRef.current = session?.user?.id ?? null
+      // Esta aba já teve sessão e agora não tem mais (recarregou, ou o refresh
+      // falhou antes do reload). Não é defeito: a sessão vive só em memória por
+      // decisão de segurança. A marca é um booleano por aba, nunca o token.
+      if (!session?.user && sessionStorage.getItem(SESSION_FLAG)) {
+        setSessionLost(true)
+        sessionStorage.removeItem(SESSION_FLAG)
+      }
       setUser(session?.user ?? null)
       setLoading(false)
     })
@@ -56,9 +72,15 @@ function App() {
           logActivity({ action: 'login' })
         }
         loggedUserIdRef.current = uid
+        setSessionLost(false)
+        if (uid) sessionStorage.setItem(SESSION_FLAG, '1')
       }
       if (event === 'SIGNED_OUT') {
         logActivity({ action: 'logout' })
+        // Estava logado e não foi ele quem pediu para sair → a sessão caiu.
+        if (loggedUserIdRef.current && !signingOutRef.current) setSessionLost(true)
+        signingOutRef.current = false
+        sessionStorage.removeItem(SESSION_FLAG)
         loggedUserIdRef.current = null
       }
       setUser(session?.user ?? null)
@@ -114,7 +136,15 @@ function App() {
       return <Login forceMode="reset" onResetDone={() => setIsRecovery(false)} />
     }
 
-    if (!user) return <Login />
+    if (!user) {
+      return (
+        <Login
+          notice={sessionLost
+            ? 'Sua sessão expirou e você precisa entrar de novo. Por segurança, o portal não guarda a sessão em cache.'
+            : null}
+        />
+      )
+    }
 
     if (view === 'admin') {
       return <Admin onBack={() => setView('dashboard')} />
@@ -131,6 +161,7 @@ function App() {
     return (
       <Dashboard
         user={user}
+        onSignOutStart={() => { signingOutRef.current = true }}
         onNavigateAdmin={() => { logActivity({ action: 'admin_access' }); setView('admin') }}
         onNavigateCeo={()   => { logActivity({ action: 'ceo_access'   }); setView('ceo')   }}
         onNavigateLogs={() => { logActivity({ action: 'log_access'    }); setView('logs')  }}
