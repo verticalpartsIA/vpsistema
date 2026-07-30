@@ -72,6 +72,45 @@ function timelineLabel(item) {
   return { ...meta, text: `${meta.verb} ${appLabel}` }
 }
 
+// Assinatura de "mesma coisa aconteceu de novo": mesmo tipo de evento, mesmo
+// alvo (módulo/app). Usada para juntar repetições, não para comparar eventos
+// diferentes.
+function eventSignature(item) {
+  return item.kind === 'log' ? `log:${item.action}:${item.target || ''}` : `event:${item.event_type}:${item.app}`
+}
+
+// Eventos idênticos e próximos no tempo viram uma linha só ("VP Click — 3
+// acessos"), em vez do log bruto evento a evento. "Próximo" é até 30 min do
+// evento anterior da mesma assinatura — perto o suficiente para ser a mesma
+// sessão de uso, longe o bastante para não juntar acessos em momentos
+// diferentes do dia.
+const CONSOLIDATE_GAP_MS = 30 * 60 * 1000
+
+function consolidateDayItems(items) {
+  const chrono = [...items].sort((a, b) => new Date(a.criado_em) - new Date(b.criado_em))
+  // O gap é medido contra a última ocorrência DA MESMA assinatura, não contra
+  // o evento anterior na lista — sem isso, alguém que dá uma passada por outro
+  // sistema no meio de vários acessos ao mesmo módulo quebra o grupo em dois,
+  // mesmo que as visitas ao módulo original continuem próximas entre si.
+  const openBySig = new Map()
+  const groups = []
+  for (const item of chrono) {
+    const sig = eventSignature(item)
+    const open = openBySig.get(sig)
+    if (open && new Date(item.criado_em) - new Date(open.lastAt) <= CONSOLIDATE_GAP_MS) {
+      open.count += 1
+      open.lastAt = item.criado_em
+    } else {
+      const group = { sig, rep: item, firstAt: item.criado_em, lastAt: item.criado_em, count: 1 }
+      openBySig.set(sig, group)
+      groups.push(group)
+    }
+  }
+  // Mais recente primeiro, pela última ocorrência de cada grupo — mesma
+  // convenção do resto da timeline, não pela primeira aparição.
+  return groups.sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt))
+}
+
 function formatTime(iso) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
@@ -140,6 +179,10 @@ function Timeline() {
   const [expandedDepts, setExpandedDepts] = useState(new Set())
   const [expandedUsers, setExpandedUsers] = useState(new Set())
   const [expandedDates, setExpandedDates] = useState(new Set())
+  // Dias em que a pessoa pediu para ver o log bruto em vez da versão
+  // consolidada (que é o padrão). Por dia, não global — quem quer auditar um
+  // dia específico não precisa abrir mão da leitura rápida no resto.
+  const [rawDates, setRawDates] = useState(new Set())
 
   function toggleDept(dept) {
     setExpandedDepts(prev => {
@@ -157,6 +200,13 @@ function Timeline() {
   }
   function toggleDate(key) {
     setExpandedDates(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+  function toggleRaw(key) {
+    setRawDates(prev => {
       const next = new Set(prev)
       next.has(key) ? next.delete(key) : next.add(key)
       return next
@@ -311,18 +361,58 @@ function Timeline() {
                                 </button>
 
                                 <div id={dateId} className="pl-5 pb-3 space-y-1">
-                                  {dateOpen && day.items.map(item => {
-                                    const { icon: Icon, color, bg, border, text } = timelineLabel(item)
+                                  {dateOpen && (() => {
+                                    const raw = rawDates.has(dateKey)
+                                    const groups = raw ? null : consolidateDayItems(day.items)
+                                    // Só vale mostrar o alternador quando a consolidação
+                                    // realmente juntou algo — se não há repetição, os dois
+                                    // modos são idênticos e o botão seria ruído.
+                                    const hasRepeats = !raw && groups.some(g => g.count > 1)
                                     return (
-                                      <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
-                                        <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
-                                          <Icon className="w-3 h-3" />
-                                          {text}
-                                        </span>
-                                        <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
-                                      </div>
+                                      <>
+                                        {(raw || hasRepeats) && (
+                                          <button
+                                            onClick={() => toggleRaw(dateKey)}
+                                            className="text-[11px] text-slate-500 hover:text-slate-300 underline decoration-dotted
+                                                       underline-offset-2 mb-1 transition-colors"
+                                          >
+                                            {raw ? 'Ver consolidado' : 'Ver eventos brutos'}
+                                          </button>
+                                        )}
+                                        {raw
+                                          ? day.items.map(item => {
+                                              const { icon: Icon, color, bg, border, text } = timelineLabel(item)
+                                              return (
+                                                <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
+                                                  <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
+                                                    <Icon className="w-3 h-3" />
+                                                    {text}
+                                                  </span>
+                                                  <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
+                                                </div>
+                                              )
+                                            })
+                                          : groups.map(g => {
+                                              const { icon: Icon, color, bg, border, text } = timelineLabel(g.rep)
+                                              const t1 = formatTime(g.firstAt)
+                                              const t2 = formatTime(g.lastAt)
+                                              const timeLabel = g.count === 1 ? t2 : (t1 === t2 ? t2 : `${t1}–${t2}`)
+                                              return (
+                                                <div key={`${g.sig}-${g.lastAt}`} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
+                                                  <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
+                                                    <Icon className="w-3 h-3" />
+                                                    {text}
+                                                    {g.count > 1 && (
+                                                      <span className="ml-0.5 px-1 rounded bg-black/20 text-[10px] font-bold">×{g.count}</span>
+                                                    )}
+                                                  </span>
+                                                  <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{timeLabel}</span>
+                                                </div>
+                                              )
+                                            })}
+                                      </>
                                     )
-                                  })}
+                                  })()}
                                 </div>
                               </div>
                             )
