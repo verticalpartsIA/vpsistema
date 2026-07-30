@@ -94,7 +94,7 @@ function Field({ label, type = 'text', value, onChange, placeholder, required, i
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Login({ forceMode = null, onResetDone = null, onExpiredDismiss = null }) {
+export default function Login({ forceMode = null, onResetDone = null, onExpiredDismiss = null, notice = null }) {
   const [email,        setEmail]        = useState('')
   const [password,     setPassword]     = useState('')
   const [showPass,     setShowPass]     = useState(false)
@@ -206,6 +206,15 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
     </div>
   ) : null
 
+  // Explica por que a pessoa voltou para cá sem ter clicado em "Sair" — antes
+  // a sessão caía em silêncio e parecia defeito do portal.
+  const NoticeBox = () => (notice && !error) ? (
+    <div role="status" className="flex items-center gap-2 rounded-lg border-l-[3px] border-amber-500 bg-amber-50 px-4 py-3">
+      <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+      <p className="text-sm text-amber-800">{notice}</p>
+    </div>
+  ) : null
+
   const SubmitBtn = ({ disabled, children }) => (
     <button type="submit" disabled={disabled}
       className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg bg-brand py-3
@@ -248,6 +257,7 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
             onChange={e => setPassword(e.target.value)} placeholder="••••••••••" required
             icon={<Lock className="h-4 w-4" />} autoComplete="current-password"
             rightSlot={<EyeBtn show={showPass} onToggle={() => setShowPass(v => !v)} />} />
+          <NoticeBox />
           <ErrorBox />
           <SubmitBtn disabled={loading}>
             {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Entrando...</> : 'Entrar →'}

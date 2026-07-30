@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logActivity } from '../lib/activityLog'
 import {
@@ -22,6 +22,14 @@ export const DEPARTMENTS = [
   'Marketing',
 ]
 const LEVELS = ['Administrador', 'Lider', 'Colaborador']
+
+// Nome de departamento → id utilizável em HTML (o aria-controls do botão de
+// expandir precisa casar com o id do <tbody> do grupo).
+function slugifyDept(dept) {
+  return dept
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
 
 export default function Admin({ onBack }) {
   const [users,    setUsers]   = useState([])
@@ -59,6 +67,9 @@ export default function Admin({ onBack }) {
   const [permLoading,   setPermLoading]   = useState(false)
   const [permSaving,    setPermSaving]    = useState(false)
   const [permMsg,       setPermMsg]       = useState(null)
+
+  // Modal inativação
+  const [toggleUser,    setToggleUser]    = useState(null)
 
   // Modal exclusão
   const [deleteUser,    setDeleteUser]    = useState(null)
@@ -112,8 +123,17 @@ export default function Admin({ onBack }) {
     return blocksMap[userId] || []
   }
 
+  // Inativar tira o acesso da pessoa a todos os sistemas na hora, e o botão
+  // fica encostado no "Excluir" — clique errado custa caro. Reativar é inócuo,
+  // então só a inativação passa pela confirmação.
+  function requestToggleActive(u) {
+    if (u.is_active) setToggleUser(u)
+    else toggleActive(u)
+  }
+
   async function toggleActive(u) {
     const newStatus = !u.is_active
+    setToggleUser(null)
     const { error } = await supabase
       .from('profiles')
       .update({ is_active: newStatus })
@@ -123,6 +143,11 @@ export default function Admin({ onBack }) {
       setActionMsg({ type: 'error', text: `Erro ao atualizar ${u.name}.` })
     } else {
       setUsers(prev => prev.map(p => p.id === u.id ? { ...p, is_active: newStatus } : p))
+      logActivity({
+        action: newStatus ? 'reactivate_user' : 'deactivate_user',
+        target: u.email || u.name,
+        details: { nome: u.name },
+      })
       setActionMsg({
         type: 'success',
         text: `${u.name} foi ${newStatus ? 'reativado' : 'desativado'}.`
@@ -599,8 +624,22 @@ export default function Admin({ onBack }) {
               onChange={e => setSearch(e.target.value)}
               placeholder="Buscar por nome ou e-mail..."
               className="w-full bg-surface-card border border-surface-border text-white placeholder-slate-600
-                         rounded-lg pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-brand transition-colors"
+                         rounded-lg pl-10 pr-10 py-2.5 text-sm focus:outline-none focus:border-brand transition-colors"
             />
+            {/* Sem isto, limpar a busca exige selecionar tudo e apagar — e a
+                lista parece vazia enquanto o texto continua no campo. */}
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Limpar busca"
+                title="Limpar busca"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white
+                           focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           <select
@@ -643,27 +682,43 @@ export default function Admin({ onBack }) {
                     <th className="text-right text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Ações</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-surface-border">
-                  {filtered.length === 0 ? (
+                {filtered.length === 0 && (
+                  <tbody className="divide-y divide-surface-border">
                     <tr>
                       <td colSpan={5} className="text-center text-slate-500 py-12 text-sm">
                         Nenhum colaborador encontrado.
                       </td>
                     </tr>
-                  ) : grouped.map(group => {
+                  </tbody>
+                )}
+                {/* Um <tbody> por departamento: dá ao grupo um elemento real
+                    para o aria-controls do botão de expandir apontar. */}
+                {filtered.length > 0 && grouped.map(group => {
                     const isOpen = Boolean(search.trim()) || expandedDepts.has(group.dept)
                     return (
-                    <Fragment key={group.dept}>
-                      <tr
-                        className="bg-surface/60 cursor-pointer select-none hover:bg-surface/80 transition-colors"
-                        onClick={() => toggleDept(group.dept)}
-                      >
-                        <td colSpan={5} className="px-6 py-3">
-                          <div className="flex items-center gap-2">
-                            {isOpen ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
-                            <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
-                            <span className="text-slate-500 text-xs">({group.members.length})</span>
-                          </div>
+                    <tbody key={group.dept} id={`dept-${slugifyDept(group.dept)}`}
+                           className="divide-y divide-surface-border">
+                      {/* O cabeçalho do grupo é um <button> de verdade, não um
+                          <tr onClick>: assim chega pelo Tab, responde a Enter
+                          e Espaço, e o leitor de tela anuncia o estado pelo
+                          aria-expanded. */}
+                      <tr className="bg-surface/60">
+                        <td colSpan={5} className="p-0">
+                          <button
+                            type="button"
+                            onClick={() => toggleDept(group.dept)}
+                            aria-expanded={isOpen}
+                            aria-controls={`dept-${slugifyDept(group.dept)}`}
+                            className="w-full px-6 py-3 text-left select-none hover:bg-surface/80
+                                       focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60
+                                       focus-visible:ring-inset transition-colors"
+                          >
+                            <span className="flex items-center gap-2">
+                              {isOpen ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-500" />}
+                              <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
+                              <span className="text-slate-500 text-xs">({group.members.length})</span>
+                            </span>
+                          </button>
                         </td>
                       </tr>
                       {isOpen && group.members.map(u => (
@@ -804,7 +859,7 @@ export default function Admin({ onBack }) {
                             Permissões
                           </button>
                           <button
-                            onClick={() => toggleActive(u)}
+                            onClick={() => requestToggleActive(u)}
                             className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors
                               ${u.is_active
                                 ? 'border-red-500/30 text-red-400 hover:bg-red-500/10'
@@ -824,9 +879,8 @@ export default function Admin({ onBack }) {
                       </td>
                         </tr>
                       ))}
-                    </Fragment>
+                    </tbody>
                   )})}
-                </tbody>
               </table>
             </div>
           </div>
@@ -1048,6 +1102,45 @@ export default function Admin({ onBack }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Confirmar Inativação ── */}
+      {toggleUser && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 px-4">
+          <div className="bg-surface-card border border-yellow-600/40 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+            <div className="flex flex-col items-center text-center gap-4">
+              <div className="w-14 h-14 rounded-full bg-yellow-500/15 flex items-center justify-center">
+                <AlertCircle className="w-7 h-7 text-yellow-500" />
+              </div>
+              <div>
+                <h2 className="text-white font-bold text-lg">Inativar colaborador?</h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> perde
+                  o acesso ao portal e a <span className="text-yellow-400 font-semibold">todos os sistemas VP</span> imediatamente.
+                </p>
+                <p className="text-slate-500 text-xs mt-2">
+                  O cadastro não é apagado — dá para reativar a qualquer momento por este mesmo botão.
+                </p>
+              </div>
+              <div className="flex gap-3 w-full mt-2">
+                <button
+                  onClick={() => setToggleUser(null)}
+                  className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border
+                             text-slate-400 hover:text-white hover:border-slate-500 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => toggleActive(toggleUser)}
+                  className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg
+                             bg-yellow-600 hover:bg-yellow-700 text-white transition-colors"
+                >
+                  Inativar
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

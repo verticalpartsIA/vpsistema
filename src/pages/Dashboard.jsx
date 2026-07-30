@@ -6,7 +6,7 @@ import { logActivity } from '../lib/activityLog'
 import { ADMIN_CARD_IMAGES } from '../lib/cardImages'
 
 
-export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavigateLogs }) {
+export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavigateLogs, onSignOutStart }) {
   const [modules,  setModules]  = useState([])
   const [profile,  setProfile]  = useState(null)
   const [loading,  setLoading]  = useState(true)
@@ -104,6 +104,9 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   }
 
   async function handleLogout() {
+    // Avisa o App de que esta saída foi pedida pela pessoa — sem isso, o
+    // SIGNED_OUT seria lido como sessão caída e mostraria o aviso de expiração.
+    if (onSignOutStart) onSignOutStart()
     await supabase.auth.signOut()
   }
 
