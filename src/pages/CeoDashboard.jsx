@@ -4,10 +4,35 @@ import { DEPARTMENTS } from './Admin'
 import {
   ArrowLeft, Loader2, BarChart2, Clock, LogIn, LogOut, Monitor,
   UserPlus, Shield, ClipboardList, Activity as ActivityIcon, RefreshCw,
-  ChevronRight, ChevronDown, Star
+  ChevronRight, ChevronDown, Star, AlertTriangle
 } from 'lucide-react'
 
 const LEVEL_RANK = { Administrador: 0, Lider: 1, Colaborador: 2 }
+
+// Antes a tela buscava só os últimos 300 registros de cada tabela, sem
+// filtro de data — com o volume atual isso cobria ~49h (pouco mais de 2
+// dias) de um histórico de 4 meses, sem avisar. Um departamento sumia da
+// lista e não dava para saber se ele não acessou nada ou se caiu fora da
+// janela. Agora o período é explícito e a busca filtra por data no banco,
+// não por "os N mais recentes" — a cobertura real fica visível sempre.
+const PERIODS = [
+  { key: 'hoje',  label: 'Hoje',    days: 1  },
+  { key: '7d',    label: '7 dias',  days: 7  },
+  { key: '30d',   label: '30 dias', days: 30 },
+]
+// Teto de segurança por tabela — não é "os N mais recentes" (isso escondia
+// a janela real); é só um limite superior para não travar o navegador se
+// um período muito longo trouxer volume anormal. 30 dias hoje traz ~5 mil
+// linhas por tabela, então 8 mil dá folga sem risco de silenciar dados.
+const SAFETY_CAP = 8000
+
+// Nome/email → id utilizável em HTML, para o aria-controls dos três níveis
+// de grupo (departamento, colaborador, dia) apontarem para um elemento real.
+function slugify(s) {
+  return (s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
 
 const APP_LABELS = {
   vpsistema:          'vpsistema',
@@ -108,6 +133,10 @@ function Timeline() {
   const [items, setItems] = useState([])
   const [profileByEmail, setProfileByEmail] = useState(new Map())
   const [loading, setLoading] = useState(true)
+  const [period, setPeriod] = useState('7d')
+  // Se algum lado bateu no teto de segurança, a janela pode conter mais
+  // eventos do que os carregados — precisa ficar visível, não escondido.
+  const [truncated, setTruncated] = useState(false)
   const [expandedDepts, setExpandedDepts] = useState(new Set())
   const [expandedUsers, setExpandedUsers] = useState(new Set())
   const [expandedDates, setExpandedDates] = useState(new Set())
@@ -136,18 +165,23 @@ function Timeline() {
 
   const load = useCallback(async () => {
     setLoading(true)
+    const days = PERIODS.find(p => p.key === period)?.days ?? 7
+    const cutoff = new Date(Date.now() - days * 86400000).toISOString()
+    // Filtra por data no banco (.gte), não por "os N mais recentes" — assim a
+    // cobertura é o período escolhido, não um corte arbitrário de linhas.
     const [logsRes, eventsRes, profilesRes] = await Promise.all([
-      sbPortal.from('activity_logs').select('*').order('criado_em', { ascending: false }).limit(300),
-      sbPortal.from('activity_events').select('*').order('criado_em', { ascending: false }).limit(300),
+      sbPortal.from('activity_logs').select('*').gte('criado_em', cutoff).order('criado_em', { ascending: false }).limit(SAFETY_CAP),
+      sbPortal.from('activity_events').select('*').gte('criado_em', cutoff).order('criado_em', { ascending: false }).limit(SAFETY_CAP),
       sbPortal.from('profiles').select('email, name, department, level, is_department_lead, is_active'),
     ])
     const logs   = (logsRes.data   || []).map(l => ({ ...l, kind: 'log' }))
     const events = (eventsRes.data || []).map(e => ({ ...e, kind: 'event' }))
     const merged = [...logs, ...events].sort((a, b) => new Date(b.criado_em) - new Date(a.criado_em))
     setItems(merged)
+    setTruncated(logs.length >= SAFETY_CAP || events.length >= SAFETY_CAP)
     setProfileByEmail(new Map((profilesRes.data || []).map(p => [(p.email || '').toLowerCase(), p])))
     setLoading(false)
-  }, [])
+  }, [period])
 
   useEffect(() => { load() }, [load])
 
@@ -155,12 +189,46 @@ function Timeline() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <h2 className="sr-only">Linha do Tempo</h2>
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-slate-400 text-sm">Rastro de acesso e navegação entre todos os sistemas, por departamento e colaborador.</p>
-        <button onClick={load} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Atualizar">
-          <RefreshCw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Período explícito: antes a tela buscava "os 300 mais recentes"
+              sem dizer quanto tempo isso cobria (podia ser só 2 dias de um
+              histórico de 4 meses). Agora quem olha escolhe a janela e sabe
+              exatamente o que está vendo. */}
+          <div className="flex items-center bg-surface-card border border-surface-border rounded-lg p-1">
+            {PERIODS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  period === p.key ? 'bg-brand text-surface' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <button onClick={load} className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5" title="Atualizar">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {!loading && (
+        <p className="text-slate-500 text-xs -mt-4">
+          Mostrando <span className="text-slate-300 font-medium">{items.length}</span> evento{items.length === 1 ? '' : 's'} — período: <span className="text-slate-300 font-medium">{PERIODS.find(p => p.key === period)?.label}</span>.
+          {' '}Departamento ou colaborador ausente aqui não teve atividade neste período.
+        </p>
+      )}
+
+      {truncated && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          Este período tem mais eventos do que os carregados aqui. Reduza para "Hoje" ou "7 dias" para ver a lista completa.
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -175,80 +243,95 @@ function Timeline() {
         <div className="bg-surface-card border border-surface-border rounded-2xl overflow-hidden divide-y divide-surface-border">
           {groups.map(group => {
             const deptOpen = expandedDepts.has(group.dept)
+            const deptId = `ceo-dept-${slugify(group.dept)}`
             return (
               <div key={group.dept}>
-                <button
-                  onClick={() => toggleDept(group.dept)}
-                  className="w-full flex items-center gap-2 px-5 py-3 bg-surface/60 hover:bg-surface/80 transition-colors text-left"
-                >
-                  {deptOpen ? <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
-                  <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
-                  <span className="text-slate-500 text-xs">({group.members.length})</span>
-                </button>
+                {/* h3 envolvendo o botão: padrão de acordeão acessível — dá
+                    aos três níveis (departamento/colaborador/dia) uma posição
+                    na árvore de headings, sem tirar o <button> como controle
+                    real (só ele tem foco, Enter/Espaço e aria-expanded). */}
+                <h3 className="contents">
+                  <button
+                    onClick={() => toggleDept(group.dept)}
+                    aria-expanded={deptOpen}
+                    aria-controls={deptId}
+                    className="w-full flex items-center gap-2 px-5 py-3 bg-surface/60 hover:bg-surface/80 transition-colors text-left
+                               focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-inset"
+                  >
+                    {deptOpen ? <ChevronDown className="w-4 h-4 text-slate-500 shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />}
+                    <span className="text-xs font-bold uppercase tracking-wider text-brand">{group.dept}</span>
+                    <span className="text-slate-500 text-xs">({group.members.length})</span>
+                  </button>
+                </h3>
 
-                {deptOpen && (
-                  <div className="divide-y divide-surface-border/60">
-                    {group.members.map(user => {
-                      const userOpen = expandedUsers.has(user.user_email)
-                      return (
-                        <div key={user.user_email} className="pl-7">
-                          <button
-                            onClick={() => toggleUser(user.user_email)}
-                            className="w-full flex items-center gap-2 px-4 py-3 hover:bg-white/5 transition-colors text-left"
-                          >
-                            {userOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
-                            <div className="w-6 h-6 rounded-full bg-brand/20 ring-1 ring-brand/30 flex items-center justify-center flex-shrink-0">
-                              <span className="text-brand font-bold text-[10px]">{(user.user_name || user.user_email || '?').slice(0, 2).toUpperCase()}</span>
-                            </div>
-                            <span className="text-white font-medium text-sm">{user.user_name || user.user_email}</span>
-                            {user.profile?.is_department_lead && (
-                              <Star className="w-3 h-3 text-blue-400 fill-blue-400 shrink-0" title="Líder do departamento" />
-                            )}
-                          </button>
-
-                          {userOpen && (
-                            <div className="pl-9 pb-3 space-y-1">
-                              {user.days.map(day => {
-                                const dateKey = `${user.user_email}::${day.dateKey}`
-                                const dateOpen = expandedDates.has(dateKey)
-                                return (
-                                  <div key={day.dateKey}>
-                                    <button
-                                      onClick={() => toggleDate(dateKey)}
-                                      className="w-full flex items-center gap-2 py-2 hover:bg-white/5 rounded-lg transition-colors text-left"
-                                    >
-                                      {dateOpen ? <ChevronDown className="w-3 h-3 text-slate-500 shrink-0" /> : <ChevronRight className="w-3 h-3 text-slate-500 shrink-0" />}
-                                      <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{day.label}</span>
-                                      <span className="text-slate-600 text-xs">({day.items.length})</span>
-                                      <div className="flex-1 h-px bg-surface-border" />
-                                    </button>
-
-                                    {dateOpen && (
-                                      <div className="pl-5 pb-3 space-y-1">
-                                        {day.items.map(item => {
-                                          const { icon: Icon, color, bg, border, text } = timelineLabel(item)
-                                          return (
-                                            <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
-                                              <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
-                                                <Icon className="w-3 h-3" />
-                                                {text}
-                                              </span>
-                                              <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
-                                            </div>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
+                {/* O container sempre existe no DOM (só o conteúdo dentro é
+                    condicional): assim o aria-controls dos três níveis aponta
+                    sempre para um elemento real, mesmo fechado. */}
+                <div id={deptId} className="divide-y divide-surface-border/60">
+                  {deptOpen && group.members.map(user => {
+                    const userOpen = expandedUsers.has(user.user_email)
+                    const userId = `ceo-user-${slugify(user.user_email)}`
+                    return (
+                      <div key={user.user_email} className="pl-7">
+                        <button
+                          onClick={() => toggleUser(user.user_email)}
+                          aria-expanded={userOpen}
+                          aria-controls={userId}
+                          className="w-full flex items-center gap-2 px-4 py-3 hover:bg-white/5 transition-colors text-left
+                                     focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60 focus-visible:ring-inset"
+                        >
+                          {userOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-500 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-500 shrink-0" />}
+                          <div className="w-6 h-6 rounded-full bg-brand/20 ring-1 ring-brand/30 flex items-center justify-center flex-shrink-0">
+                            <span className="text-brand font-bold text-[10px]">{(user.user_name || user.user_email || '?').slice(0, 2).toUpperCase()}</span>
+                          </div>
+                          <span className="text-white font-medium text-sm">{user.user_name || user.user_email}</span>
+                          {user.profile?.is_department_lead && (
+                            <Star className="w-3 h-3 text-blue-400 fill-blue-400 shrink-0" title="Líder do departamento" />
                           )}
+                        </button>
+
+                        <div id={userId} className="pl-9 pb-3 space-y-1">
+                          {userOpen && user.days.map(day => {
+                            const dateKey = `${user.user_email}::${day.dateKey}`
+                            const dateOpen = expandedDates.has(dateKey)
+                            const dateId = `ceo-date-${slugify(user.user_email)}-${slugify(day.dateKey)}`
+                            return (
+                              <div key={day.dateKey}>
+                                <button
+                                  onClick={() => toggleDate(dateKey)}
+                                  aria-expanded={dateOpen}
+                                  aria-controls={dateId}
+                                  className="w-full flex items-center gap-2 py-2 hover:bg-white/5 rounded-lg transition-colors text-left
+                                             focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/60"
+                                >
+                                  {dateOpen ? <ChevronDown className="w-3 h-3 text-slate-500 shrink-0" /> : <ChevronRight className="w-3 h-3 text-slate-500 shrink-0" />}
+                                  <span className="text-slate-500 text-xs font-semibold uppercase tracking-wider">{day.label}</span>
+                                  <span className="text-slate-600 text-xs">({day.items.length})</span>
+                                  <div className="flex-1 h-px bg-surface-border" />
+                                </button>
+
+                                <div id={dateId} className="pl-5 pb-3 space-y-1">
+                                  {dateOpen && day.items.map(item => {
+                                    const { icon: Icon, color, bg, border, text } = timelineLabel(item)
+                                    return (
+                                      <div key={item.id} className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors">
+                                        <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border ${bg} ${border} ${color} font-medium`}>
+                                          <Icon className="w-3 h-3" />
+                                          {text}
+                                        </span>
+                                        <span className="text-slate-600 text-xs ml-auto flex-shrink-0">{formatTime(item.criado_em)}</span>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )
           })}
@@ -274,7 +357,9 @@ export default function CeoDashboard({ onBack }) {
             <div className="flex items-center gap-3">
               <img src="/vp-logo.png" alt="VP" className="w-9 h-9 rounded-xl object-cover" />
               <div>
-                <p className="text-white font-semibold leading-none">Painel Executivo</p>
+                {/* Página sem nenhum heading até aqui — leitor de tela não
+                    tinha por onde navegar a estrutura. h1 (só um por página). */}
+                <h1 className="text-white font-semibold leading-none text-base">Painel Executivo</h1>
                 <p className="text-slate-500 text-xs mt-0.5">Linha do tempo de acesso — todos os sistemas</p>
               </div>
             </div>
