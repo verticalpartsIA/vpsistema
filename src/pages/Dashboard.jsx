@@ -92,8 +92,12 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
 
     try {
       const targetApp = new URL(mod.url).hostname.split('.')[0]
+      // refreshToken só é usado pelo ramo 'sameproject' do sso-proxy (apps que
+      // rodam no mesmo projeto Supabase, ex.: Gente & Gestão); os demais tipos
+      // ignoram o campo, então é seguro sempre mandar.
+      const { data: { session } } = await supabase.auth.getSession()
       const { data, error } = await supabase.functions.invoke('sso-proxy', {
-        body: { targetApp },
+        body: { targetApp, refreshToken: session?.refresh_token },
       })
 
       let finalUrl = mod.url

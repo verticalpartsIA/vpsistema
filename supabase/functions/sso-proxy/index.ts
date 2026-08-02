@@ -25,7 +25,7 @@ serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await vpsistema.auth.getUser()
     if (authErr || !user?.email) return json({ error: 'Invalid session' }, 401)
 
-    const { targetApp } = await req.json()
+    const { targetApp, refreshToken } = await req.json()
     const app = APPS[targetApp]
 
     // ── Controle de acesso por módulo (server-side) ──
@@ -67,6 +67,20 @@ serve(async (req: Request) => {
       .eq('id', user.id)
       .single()
     logEnter(targetApp, user.email, prof?.name)
+
+    // Same-project SSO: o app satélite roda no MESMO projeto Supabase do
+    // vpsistema (ex.: Gente & Gestão), então o access_token e o refresh_token
+    // desta sessão já são válidos lá — sem generateLink, sem provisionamento.
+    // Precisa do refreshToken vindo do body porque o cliente Supabase não o
+    // manda no header Authorization (só o access_token).
+    if (app?.ssoType === 'sameproject') {
+      if (!refreshToken) return json({ error: 'Missing refresh token' }, 400)
+      const token = authHeader.replace('Bearer ', '')
+      const u = new URL(app.redirectTo)
+      u.searchParams.set('sso_token', token)
+      u.searchParams.set('sso_refresh', refreshToken)
+      return json({ actionLink: u.toString() })
+    }
 
     // Token-based SSO: pass vpsistema JWT directly as ?sso_token=.
     // Módulo sem entrada em APPS cai aqui também, usando a URL cadastrada em

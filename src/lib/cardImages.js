@@ -34,6 +34,7 @@ const MODULE_IMAGES = {
   demanda:            IMAGES[7],  // neon → demandas
   suporte:            IMAGES[0],  // azul → TI/suporte
   propostas:          IMAGES[3],  // moderna → comercial
+  'gente-gestao':     IMAGES[2],  // shopping amplo → pessoas/gestão
 }
 
 // Fallback: retorna imagem por slug; se não mapeado, usa por índice rotativo

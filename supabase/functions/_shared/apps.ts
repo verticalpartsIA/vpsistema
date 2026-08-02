@@ -21,7 +21,17 @@ export type TokenApp = {
   redirectTo: string
 }
 
-export type AppConfig = MagicLinkApp | TokenApp
+// App que roda no MESMO projeto Supabase do vpsistema (ex.: Gente & Gestão).
+// Não precisa de service key nem de provisionamento — o access_token e o
+// refresh_token da sessão atual já são válidos lá, porque é o mesmo servidor
+// de auth. O sso-proxy repassa os dois como ?sso_token=&sso_refresh=.
+export type SameProjectApp = {
+  ssoType: 'sameproject'
+  moduleSlug: string
+  redirectTo: string
+}
+
+export type AppConfig = MagicLinkApp | TokenApp | SameProjectApp
 
 export const APPS: Record<string, AppConfig> = {
   // Apps com Supabase Auth próprio → magic link (precisam de usuário provisionado)
@@ -81,6 +91,16 @@ export const APPS: Record<string, AppConfig> = {
     ssoType: 'token',
     moduleSlug: 'suporte',
     redirectTo: 'https://suporte.vpsistema.com',
+  },
+  // Gente & Gestão (RH/DP): app novo que usa o MESMO projeto Supabase do
+  // vpsistema — mesma tabela profiles, mesmo auth.users. Não é magiclink
+  // (não precisa criar/provisionar usuário em outro projeto) nem token puro
+  // (o app tem Supabase Auth próprio e precisa de uma sessão real, não só do
+  // JWT pra validar server-side) — por isso o tipo 'sameproject'.
+  gentegestao: {
+    ssoType: 'sameproject',
+    moduleSlug: 'gente-gestao',
+    redirectTo: 'https://gentegestao.vpsistema.com/dashboard',
   },
 }
 
