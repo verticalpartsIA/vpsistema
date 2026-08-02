@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { email, name, level, department, password, avatar_url, resend } = await req.json()
+    const { email, name, level, department, is_department_lead, password, avatar_url, resend } = await req.json()
 
     if (!password || password.length < 6) {
       return new Response(JSON.stringify({ error: 'A senha temporária deve ter pelo menos 6 caracteres.' }), {
@@ -144,6 +144,17 @@ Deno.serve(async (req) => {
       await supabaseAdmin
         .from('profiles')
         .update({ avatar_url })
+        .eq('id', mainUser.id)
+    }
+
+    // 1c. Marca líder de departamento (handle_new_user não lê isso da
+    // metadata — só existe via update explícito). Dispara o trigger
+    // auto_assign_manager_id, que posiciona a pessoa no organograma do
+    // GenteGestão automaticamente.
+    if (is_department_lead && mainUser?.id) {
+      await supabaseAdmin
+        .from('profiles')
+        .update({ is_department_lead: true })
         .eq('id', mainUser.id)
     }
 

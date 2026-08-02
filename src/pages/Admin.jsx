@@ -52,7 +52,7 @@ export default function Admin({ onBack }) {
 
   // Modal convite
   const [showInvite,    setShowInvite]    = useState(false)
-  const [invite,        setInvite]        = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
+  const [invite,        setInvite]        = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '', is_department_lead: false })
   const [inviting,      setInviting]      = useState(false)
   const [inviteMsg,     setInviteMsg]     = useState(null)
   const [showResend,    setShowResend]    = useState(false)  // e-mail já cadastrado → oferecer reenvio de credenciais
@@ -62,6 +62,8 @@ export default function Admin({ onBack }) {
   // Modal permissões
   const [permUser,      setPermUser]      = useState(null)   // usuário sendo editado
   const [permLevel,     setPermLevel]     = useState('')     // nível em edição
+  const [permDept,      setPermDept]      = useState('')     // departamento em edição
+  const [permIsLead,    setPermIsLead]    = useState(false)  // líder de departamento em edição
   const [permSlugs,     setPermSlugs]     = useState([])     // slugs marcados ([] = acesso pleno)
   const [permFull,      setPermFull]      = useState(true)   // toggle "acesso total"
   const [permLoading,   setPermLoading]   = useState(false)
@@ -201,6 +203,8 @@ export default function Admin({ onBack }) {
   async function openPerms(u) {
     setPermUser(u)
     setPermLevel(u.level || 'Colaborador')
+    setPermDept(u.department || '')
+    setPermIsLead(Boolean(u.is_department_lead))
     setPermMsg(null)
     setPermLoading(true)
 
@@ -238,10 +242,12 @@ export default function Admin({ onBack }) {
     setPermSaving(true)
     setPermMsg(null)
 
-    // 1. Atualiza o nível/cargo
+    // 1. Atualiza nível, departamento e liderança (department/is_department_lead
+    //    disparam o trigger auto_assign_manager_id no banco, que recalcula
+    //    sozinho a posição desta pessoa no organograma do GenteGestão)
     const { error: levelErr } = await supabase
       .from('profiles')
-      .update({ level: permLevel })
+      .update({ level: permLevel, department: permDept || null, is_department_lead: permIsLead })
       .eq('id', permUser.id)
 
     if (levelErr) {
@@ -278,9 +284,11 @@ export default function Admin({ onBack }) {
       }
     }
 
-    // Atualiza lista local de usuários com o novo nível
+    // Atualiza lista local de usuários com nível, departamento e liderança
     setUsers(prev => prev.map(p =>
-      p.id === permUser.id ? { ...p, level: permLevel } : p
+      p.id === permUser.id
+        ? { ...p, level: permLevel, department: permDept || null, is_department_lead: permIsLead }
+        : p
     ))
 
     // Atualiza o mapa local de bloqueios para refletir na tabela imediatamente
@@ -296,6 +304,8 @@ export default function Admin({ onBack }) {
       target: permUser.name || permUser.email,
       details: {
         nivel: permLevel,
+        departamento: permDept || '(nenhum)',
+        lider_departamento: permIsLead,
         acesso: blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
       },
     })
@@ -315,7 +325,7 @@ export default function Admin({ onBack }) {
   }
 
   function resetInviteModal() {
-    setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '' })
+    setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '', is_department_lead: false })
     setAvatarFile(null)
     setShowResend(false)
     if (avatarPreview) { URL.revokeObjectURL(avatarPreview); setAvatarPreview(null) }
@@ -346,6 +356,7 @@ export default function Admin({ onBack }) {
         name:       invite.name,
         level:      invite.level,
         department: invite.department || null,
+        is_department_lead: invite.is_department_lead,
         password:   invite.password,
         avatar_url: avatarUrl,
         resend,
@@ -925,6 +936,36 @@ export default function Admin({ onBack }) {
                   </select>
                 </div>
 
+                {/* Departamento */}
+                <div>
+                  <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                    Departamento
+                  </label>
+                  <select
+                    value={permDept}
+                    onChange={e => setPermDept(e.target.value)}
+                    className="w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-3 py-3 text-sm
+                               focus:outline-none focus:border-brand transition-colors"
+                  >
+                    <option value="">Selecionar</option>
+                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+
+                {/* Líder de departamento */}
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-surface-border cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={permIsLead}
+                    onChange={e => setPermIsLead(e.target.checked)}
+                    className="w-4 h-4 accent-amber-400 cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-slate-300 text-sm font-medium block">É líder do departamento</span>
+                    <span className="text-slate-500 text-xs">Define quem os demais colaboradores desse departamento reportam no organograma.</span>
+                  </div>
+                </label>
+
                 {/* Acesso aos sistemas */}
                 <div>
                   <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
@@ -1309,6 +1350,19 @@ export default function Admin({ onBack }) {
                   </select>
                 </div>
               </div>
+
+              <label className="flex items-center gap-3 p-3 rounded-lg border border-surface-border cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={invite.is_department_lead}
+                  onChange={e => setInvite(p => ({ ...p, is_department_lead: e.target.checked }))}
+                  className="w-4 h-4 accent-amber-400 cursor-pointer"
+                />
+                <div>
+                  <span className="text-slate-300 text-sm font-medium block">É líder do departamento</span>
+                  <span className="text-slate-500 text-xs">Define quem os demais colaboradores desse departamento reportam no organograma.</span>
+                </div>
+              </label>
 
               <div>
                 <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
