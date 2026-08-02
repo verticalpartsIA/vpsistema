@@ -900,8 +900,8 @@ export default function Admin({ onBack }) {
 
       {/* ── Modal: Permissões ── */}
       {permUser && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-lg shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
+          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-lg shadow-2xl max-h-full overflow-y-auto">
 
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -1080,8 +1080,8 @@ export default function Admin({ onBack }) {
 
       {/* ── Modal: Editar Nome ── */}
       {editNameUser && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
+          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-sm shadow-2xl max-h-full overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-white font-bold text-lg">Editar Nome</h2>
               <button
@@ -1246,8 +1246,8 @@ export default function Admin({ onBack }) {
 
       {/* ── Modal: Convidar ── */}
       {showInvite && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
+          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-md shadow-2xl max-h-full overflow-y-auto">
 
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-white font-bold text-lg">Convidar Colaborador</h2>
