@@ -103,7 +103,13 @@ Deno.serve(async (req) => {
 
     if (existingProfile?.id) {
       const { data: authLookup, error: authLookupErr } = await supabaseAdmin.auth.admin.getUserById(existingProfile.id)
-      if (!authLookupErr && !authLookup?.user) {
+      // getUserById responde com ERRO (404 "User not found") quando o id não
+      // existe no Auth — não é só "data.user null" sem erro. Tratar qualquer
+      // erro como inconclusivo (como na 1ª versão) nunca deleta o órfão, que
+      // é exatamente o caso mais comum aqui. Só ficamos conservadores diante
+      // de um erro que não seja "não encontrado" (ex.: falha de rede).
+      const notFound = !authLookup?.user && (!authLookupErr || /not.*found/i.test(authLookupErr.message || ''))
+      if (notFound) {
         await supabaseAdmin.from('profiles').delete().eq('id', existingProfile.id)
       }
     }
@@ -149,7 +155,10 @@ Deno.serve(async (req) => {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         })
       } else {
-        return new Response(JSON.stringify({ error: mainError.message }), {
+        // mainError.message pode vir undefined dependendo do formato do erro
+        // devolvido pelo GoTrue — nesse caso JSON.stringify({ error: undefined })
+        // gera o corpo "{}" e o admin não vê nada útil. Sempre manda algo legível.
+        return new Response(JSON.stringify({ error: mainError.message || JSON.stringify(mainError) || 'Erro desconhecido ao criar usuário.' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         })
       }
