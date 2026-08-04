@@ -90,6 +90,24 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
+    // 0. Se existir um profile órfão com este e-mail — auth.users apagado
+    // direto no painel do Supabase (ou por uma exclusão anterior que não
+    // limpou o profile), sem passar pelo delete-user — remove antes de
+    // criar. Sem isso, a unique constraint em profiles.email trava a
+    // criação do novo usuário pra sempre (caso Vinicius Leite).
+    const { data: existingProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle()
+
+    if (existingProfile?.id) {
+      const { data: authLookup, error: authLookupErr } = await supabaseAdmin.auth.admin.getUserById(existingProfile.id)
+      if (!authLookupErr && !authLookup?.user) {
+        await supabaseAdmin.from('profiles').delete().eq('id', existingProfile.id)
+      }
+    }
+
     // 1. Cria o usuário no vpsistema com senha definida pelo admin
     let mainUser = null
     const { data: mainData, error: mainError } = await supabaseAdmin.auth.admin.createUser({

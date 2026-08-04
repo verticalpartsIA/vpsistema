@@ -460,15 +460,23 @@ export default function Admin({ onBack }) {
     const name = deleteUser.name || deleteUser.email
 
     if (data?.action === 'inactivated') {
-      // Usuário tem transações registradas em algum satélite: exclusão
-      // vira inativação para não órfão dados de negócio já gravados lá.
-      logActivity({ action: 'delete_user', target: deleteUser.email, details: { resultado: 'inativado_por_transacoes' } })
+      // Exclusão virou inativação para não órfão dados de negócio já
+      // gravados: transações em algum satélite, ou vínculos em Gente &
+      // Gestão (avaliações, vagas, treinamentos) que impedem apagar o profile.
+      const linkedRecords = data?.reason === 'linked_records'
+      logActivity({
+        action: 'delete_user',
+        target: deleteUser.email,
+        details: { resultado: linkedRecords ? 'inativado_por_vinculos' : 'inativado_por_transacoes' },
+      })
       setUsers(prev => prev.map(p => p.id === deleteUser.id ? { ...p, is_active: false } : p))
       setDeleteUser(null)
       setDeleting(false)
       setActionMsg({
         type: 'success',
-        text: `${name} possui transações registradas em algum sistema — foi apenas inativado, não excluído.`
+        text: linkedRecords
+          ? `${name} possui vínculos em Gente & Gestão (avaliações, vagas, treinamentos) — foi apenas inativado, não excluído.`
+          : `${name} possui transações registradas em algum sistema — foi apenas inativado, não excluído.`
       })
       setTimeout(() => setActionMsg(null), 5000)
       return
