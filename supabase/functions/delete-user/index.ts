@@ -160,9 +160,34 @@ Deno.serve(async (req) => {
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    // 1. Deleta do vpsistema (cascade deleta profile)
+    // 1. Deleta do vpsistema. Não há FK/trigger que apague o profile quando o
+    // auth.users é removido (profiles.id nem referencia auth.users) — por
+    // isso o passo 1b abaixo é explícito. Se o usuário já não existir mais
+    // no Auth (ex.: alguém apagou direto no painel do Supabase), não travamos
+    // a exclusão: seguimos para limpar o profile órfão que ficaria pra trás
+    // travando qualquer reconvite futuro pelo mesmo e-mail (unique constraint).
     const { error: mainErr } = await supabaseAdmin.auth.admin.deleteUser(user_id)
-    if (mainErr) return new Response(JSON.stringify({ error: mainErr.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    if (mainErr) {
+      const { data: stillThere } = await supabaseAdmin.auth.admin.getUserById(user_id)
+      if (stillThere?.user) {
+        return new Response(JSON.stringify({ error: mainErr.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+    }
+
+    // 1b. Remove o profile. Pode falhar por FK (vínculos em Gente & Gestão,
+    // como avaliações, vagas ou treinamentos) — nesse caso não apagamos, só
+    // inativamos, igual já fazemos quando há transações nos satélites.
+    const { error: profileErr } = await supabaseAdmin.from('profiles').delete().eq('id', user_id)
+    if (profileErr) {
+      await supabaseAdmin.from('profiles').update({ is_active: false }).eq('id', user_id)
+      await supabaseAdmin.from('module_permissions').delete().eq('user_id', user_id)
+      return new Response(JSON.stringify({
+        success: true,
+        action: 'inactivated',
+        reason: 'linked_records',
+        detail: profileErr.message,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
 
     // 2. Deleta em todas as outras plataformas (busca pelo email)
     const platformResults: { platform: string; status: string; error?: string }[] = []
