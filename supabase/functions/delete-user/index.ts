@@ -1,17 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { PLATFORMS, findUserByEmail } from '../_shared/platforms.ts'
+import { withRetry } from '../_shared/retry.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
-
-const PLATFORMS = [
-  { name: 'VP Requisições',   url: Deno.env.get('SB_VPREQUISICAO_URL'),  key: Deno.env.get('SB_VPREQUISICAO_SERVICE_KEY') },
-  { name: 'Pós-Venda 360',    url: Deno.env.get('SB_POSVENDA360_URL'),   key: Deno.env.get('SB_POSVENDA360_SERVICE_KEY') },
-  { name: 'Propostas',        url: Deno.env.get('SB_PROPOSTAS_URL'),     key: Deno.env.get('SB_PROPOSTAS_SERVICE_KEY') },
-  { name: 'Visitas e Brindes',url: Deno.env.get('SB_VISITAS_URL'),       key: Deno.env.get('SB_VISITAS_SERVICE_KEY') },
-  { name: 'VP Catraca',       url: Deno.env.get('SB_CATRACA_URL'),       key: Deno.env.get('SB_CATRACA_SERVICE_KEY') },
-]
 
 // Satélites cujo schema de negócio conhecemos o suficiente para checar se o
 // usuário tem alguma transação registrada (o que impediria a exclusão física
@@ -127,8 +121,7 @@ Deno.serve(async (req) => {
       if (!check.url || !check.key) { transactionResults.push({ platform: check.name, status: 'skipped' }); continue }
       try {
         const client = createClient(check.url, check.key)
-        const { data: users } = await client.auth.admin.listUsers()
-        const target = users?.users?.find(u => u.email === email)
+        const target = await findUserByEmail(client, email)
         const found = await check.hasAny(client, target?.id ?? '', email)
         if (found) hasTransactions = true
         transactionResults.push({ platform: check.name, status: found ? 'has_transactions' : 'clean' })
@@ -196,16 +189,18 @@ Deno.serve(async (req) => {
       if (!platform.url || !platform.key) { platformResults.push({ platform: platform.name, status: 'skipped' }); continue }
       try {
         const adminClient = createClient(platform.url, platform.key)
-        const { data: users } = await adminClient.auth.admin.listUsers()
-        const target = users?.users?.find(u => u.email === email)
+        const target = await findUserByEmail(adminClient, email)
         if (target) {
-          const { error } = await adminClient.auth.admin.deleteUser(target.id)
-          platformResults.push({ platform: platform.name, status: error ? 'error' : 'ok', error: error?.message })
+          await withRetry(async () => {
+            const { error } = await adminClient.auth.admin.deleteUser(target.id)
+            if (error) throw error
+          })
+          platformResults.push({ platform: platform.name, status: 'ok' })
         } else {
           platformResults.push({ platform: platform.name, status: 'not_found' })
         }
       } catch (e) {
-        platformResults.push({ platform: platform.name, status: 'error', error: String(e) })
+        platformResults.push({ platform: platform.name, status: 'error', error: e?.message || String(e) })
       }
     }
 
