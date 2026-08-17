@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { appForModuleSlug } from '../_shared/apps.ts'
+import { withRetry } from '../_shared/retry.ts'
 
 // Disparada por um trigger em module_permissions e pelo invite-user —
 // provisiona o usuário no app satélite sem depender do primeiro clique em
@@ -92,20 +93,31 @@ serve(async (req: Request) => {
 
       const admin = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } })
 
-      const { data: created, error: createErr } = await admin.auth.admin.createUser({
-        email: profile.email,
-        email_confirm: true,
-      })
+      // GoTrue do Propostas responde instável (ver comentário acima) —
+      // tenta de novo em erro que não seja "já existe" antes de desistir.
+      const { data: created, error: createErr } = await withRetry(async () => {
+        const res = await admin.auth.admin.createUser({
+          email: profile.email,
+          email_confirm: true,
+        })
+        const alreadyExists = res.error && /already.*registered|already.*exists/i.test(res.error.message ?? '')
+        if (res.error && !alreadyExists) throw res.error
+        return res
+      }).catch((e) => ({ data: null, error: e }))
       let authId = created?.user?.id
       if (!authId) {
         if (createErr && !/already.*registered|already.*exists/i.test(createErr.message ?? '')) {
           console.error('propostas createUser error:', createErr.message)
           return json({ error: 'Falha ao provisionar usuário no Propostas (tente novamente)' }, 500)
         }
-        const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-          type: 'magiclink',
-          email: profile.email,
-        })
+        const { data: linkData, error: linkErr } = await withRetry(async () => {
+          const res = await admin.auth.admin.generateLink({
+            type: 'magiclink',
+            email: profile.email,
+          })
+          if (res.error) throw res.error
+          return res
+        }).catch((e) => ({ data: null, error: e }))
         authId = linkData?.user?.id
         if (linkErr || !authId) {
           console.error('propostas generateLink error:', linkErr?.message)
@@ -167,11 +179,16 @@ serve(async (req: Request) => {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
-    const { error: createErr } = await admin.auth.admin.createUser({
-      email: profile.email,
-      email_confirm: true,
-      user_metadata: { full_name: profile.name, department: profile.department },
-    })
+    const { error: createErr } = await withRetry(async () => {
+      const res = await admin.auth.admin.createUser({
+        email: profile.email,
+        email_confirm: true,
+        user_metadata: { full_name: profile.name, department: profile.department },
+      })
+      const alreadyExists = res.error && /already.*registered|already.*exists/i.test(res.error.message ?? '')
+      if (res.error && !alreadyExists) throw res.error
+      return res
+    }).catch((e) => ({ error: e }))
     if (createErr && !/already.*registered|already.*exists/i.test(createErr.message ?? '')) {
       console.error('createUser error:', createErr)
       return json({ error: 'Falha ao provisionar usuário no app de destino' }, 500)

@@ -1,40 +1,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import nodemailer from 'npm:nodemailer'
+import { PLATFORMS } from '../_shared/platforms.ts'
+import { withRetry } from '../_shared/retry.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
-
-// Plataformas que receberão o novo usuário automaticamente
-// As chaves são configuradas como secrets no painel Supabase → Edge Functions → Secrets
-const PLATFORMS = [
-  {
-    name: 'VP Requisições',
-    url:  Deno.env.get('SB_VPREQUISICAO_URL'),
-    key:  Deno.env.get('SB_VPREQUISICAO_SERVICE_KEY'),
-  },
-  {
-    name: 'Pós-Venda 360',
-    url:  Deno.env.get('SB_POSVENDA360_URL'),
-    key:  Deno.env.get('SB_POSVENDA360_SERVICE_KEY'),
-  },
-  {
-    name: 'Propostas',
-    url:  Deno.env.get('SB_PROPOSTAS_URL'),
-    key:  Deno.env.get('SB_PROPOSTAS_SERVICE_KEY'),
-  },
-  {
-    name: 'Visitas e Brindes',
-    url:  Deno.env.get('SB_VISITAS_URL'),
-    key:  Deno.env.get('SB_VISITAS_SERVICE_KEY'),
-  },
-  {
-    name: 'VP Catraca',
-    url:  Deno.env.get('SB_CATRACA_URL'),
-    key:  Deno.env.get('SB_CATRACA_SERVICE_KEY'),
-  },
-]
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -196,20 +168,27 @@ Deno.serve(async (req) => {
 
       try {
         const adminClient = createClient(platform.url, platform.key)
-        const { error } = await adminClient.auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-          user_metadata: { name, department: department || null }
+        // "Already exists" não é falha transitória — não adianta tentar de
+        // novo. Qualquer outro erro (ex.: GoTrue instável) entra no retry.
+        const result = await withRetry(async () => {
+          const res = await adminClient.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: { name, department: department || null }
+          })
+          const alreadyExists = res.error && /already.*registered|already.*exists/i.test(res.error.message)
+          if (res.error && !alreadyExists) throw res.error
+          return res
         })
-        const exists = error && /already.*registered|already.*exists/i.test(error.message)
+        const exists = result.error && /already.*registered|already.*exists/i.test(result.error.message)
         platformResults.push({
           platform: platform.name,
-          status: error ? (exists ? 'exists' : 'error') : 'ok',
-          error: exists ? undefined : error?.message
+          status: result.error ? (exists ? 'exists' : 'error') : 'ok',
+          error: exists ? undefined : result.error?.message
         })
       } catch (e) {
-        platformResults.push({ platform: platform.name, status: 'error', error: String(e) })
+        platformResults.push({ platform: platform.name, status: 'error', error: e?.message || String(e) })
       }
     }
 
