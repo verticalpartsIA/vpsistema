@@ -102,6 +102,11 @@ export const APPS: Record<string, AppConfig> = {
     moduleSlug: 'gente-gestao',
     redirectTo: 'https://gentegestao.vpsistema.com/dashboard',
   },
+  assetmanager: {
+    ssoType: 'sameproject',
+    moduleSlug: 'assetmanager',
+    redirectTo: 'https://assetmanager.vpsistema.com/dashboard',
+  },
 }
 
 /** Config do app satélite a partir do slug da tabela `modules`. */
