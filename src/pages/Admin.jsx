@@ -212,14 +212,17 @@ export default function Admin({ onBack }) {
     setUsers(prev => prev.map(p => p.id === editNameUser.id
       ? { ...p, name: newName, job_title: newFuncao, celular: newCelular }
       : p))
+    // ActivityLog renderiza cada valor de `details` como string (`${k}: ${v}`)
+    // — objetos aninhados tipo { de, para } viram "[object Object]" na tela,
+    // por isso a mudança já vai achatada em "de → para".
+    const changes = {}
+    if (newName !== oldName) changes.nome = `${oldName || '—'} → ${newName}`
+    if (newFuncao !== oldFuncao) changes.funcao = `${oldFuncao || '—'} → ${newFuncao || '—'}`
+    if (newCelular !== oldCelular) changes.celular = `${oldCelular || '—'} → ${newCelular || '—'}`
     logActivity({
       action: 'edit_profile',
       target: editNameUser.email,
-      details: {
-        nome: newName !== oldName ? { de: oldName, para: newName } : undefined,
-        funcao: newFuncao !== oldFuncao ? { de: oldFuncao, para: newFuncao } : undefined,
-        celular: newCelular !== oldCelular ? { de: oldCelular, para: newCelular } : undefined,
-      },
+      details: changes,
     })
     setEditNameMsg({ type: 'success', text: 'Colaborador atualizado com sucesso!' })
     setEditNameSaving(false)
