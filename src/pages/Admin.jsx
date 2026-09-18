@@ -31,6 +31,15 @@ function slugifyDept(dept) {
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
+// celular é guardado só com dígitos — formata (DD) 9DDDD-DDDD pra exibição;
+// número fora do padrão de 11 dígitos (DDD + celular) cai pro valor cru.
+function formatCelular(celular) {
+  if (!celular) return null
+  const digits = celular.replace(/\D/g, '')
+  if (digits.length !== 11) return celular
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
+}
+
 export default function Admin({ onBack }) {
   const [users,    setUsers]   = useState([])
   const [modules,  setModules] = useState([])
@@ -78,9 +87,11 @@ export default function Admin({ onBack }) {
   const [deleting,      setDeleting]      = useState(false)
   const [deleteMsg,     setDeleteMsg]     = useState(null)
 
-  // Modal editar nome
+  // Modal editar colaborador (nome, função, celular)
   const [editNameUser,  setEditNameUser]  = useState(null)   // usuário sendo editado
   const [editNameValue, setEditNameValue] = useState('')
+  const [editFuncaoValue, setEditFuncaoValue] = useState('')
+  const [editCelularValue, setEditCelularValue] = useState('')
   const [editNameSaving, setEditNameSaving] = useState(false)
   const [editNameMsg,   setEditNameMsg]   = useState(null)
 
@@ -158,19 +169,28 @@ export default function Admin({ onBack }) {
     setTimeout(() => setActionMsg(null), 3500)
   }
 
-  function openEditName(u) {
+  function openEditProfile(u) {
     setEditNameUser(u)
     setEditNameValue(u.name || '')
+    setEditFuncaoValue(u.job_title || '')
+    setEditCelularValue(u.celular || '')
     setEditNameMsg(null)
   }
 
-  async function saveEditName() {
+  async function saveEditProfile() {
     const newName = editNameValue.trim()
     if (!newName) {
       setEditNameMsg({ type: 'error', text: 'O nome não pode ficar em branco.' })
       return
     }
-    if (newName === editNameUser.name) {
+    const newFuncao  = editFuncaoValue.trim() || null
+    const newCelular = editCelularValue.replace(/\D/g, '') || null
+
+    const oldName    = editNameUser.name
+    const oldFuncao  = editNameUser.job_title || null
+    const oldCelular = editNameUser.celular || null
+    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCelular === oldCelular
+    if (nothingChanged) {
       setEditNameUser(null)
       return
     }
@@ -178,21 +198,33 @@ export default function Admin({ onBack }) {
     setEditNameSaving(true)
     setEditNameMsg(null)
 
-    const oldName = editNameUser.name
     const { error } = await supabase
       .from('profiles')
-      .update({ name: newName })
+      .update({ name: newName, job_title: newFuncao, celular: newCelular })
       .eq('id', editNameUser.id)
 
     if (error) {
-      setEditNameMsg({ type: 'error', text: 'Erro ao atualizar o nome.' })
+      setEditNameMsg({ type: 'error', text: 'Erro ao atualizar o colaborador.' })
       setEditNameSaving(false)
       return
     }
 
-    setUsers(prev => prev.map(p => p.id === editNameUser.id ? { ...p, name: newName } : p))
-    logActivity({ action: 'edit_name', target: editNameUser.email, details: { nome_antigo: oldName, nome_novo: newName } })
-    setEditNameMsg({ type: 'success', text: 'Nome atualizado com sucesso!' })
+    setUsers(prev => prev.map(p => p.id === editNameUser.id
+      ? { ...p, name: newName, job_title: newFuncao, celular: newCelular }
+      : p))
+    // ActivityLog renderiza cada valor de `details` como string (`${k}: ${v}`)
+    // — objetos aninhados tipo { de, para } viram "[object Object]" na tela,
+    // por isso a mudança já vai achatada em "de → para".
+    const changes = {}
+    if (newName !== oldName) changes.nome = `${oldName || '—'} → ${newName}`
+    if (newFuncao !== oldFuncao) changes.funcao = `${oldFuncao || '—'} → ${newFuncao || '—'}`
+    if (newCelular !== oldCelular) changes.celular = `${oldCelular || '—'} → ${newCelular || '—'}`
+    logActivity({
+      action: 'edit_profile',
+      target: editNameUser.email,
+      details: changes,
+    })
+    setEditNameMsg({ type: 'success', text: 'Colaborador atualizado com sucesso!' })
     setEditNameSaving(false)
     setTimeout(() => {
       setEditNameUser(null)
@@ -696,6 +728,8 @@ export default function Admin({ onBack }) {
                   <tr className="border-b border-surface-border">
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Colaborador</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden sm:table-cell">Nível</th>
+                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Função</th>
+                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4">Status</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden lg:table-cell">Acessos</th>
                     <th className="text-right text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Ações</th>
@@ -704,7 +738,7 @@ export default function Admin({ onBack }) {
                 {filtered.length === 0 && (
                   <tbody className="divide-y divide-surface-border">
                     <tr>
-                      <td colSpan={5} className="text-center text-slate-500 py-12 text-sm">
+                      <td colSpan={7} className="text-center text-slate-500 py-12 text-sm">
                         Nenhum colaborador encontrado.
                       </td>
                     </tr>
@@ -722,7 +756,7 @@ export default function Admin({ onBack }) {
                           e Espaço, e o leitor de tela anuncia o estado pelo
                           aria-expanded. */}
                       <tr className="bg-surface/60">
-                        <td colSpan={5} className="p-0">
+                        <td colSpan={7} className="p-0">
                           <button
                             type="button"
                             onClick={() => toggleDept(group.dept)}
@@ -787,9 +821,9 @@ export default function Admin({ onBack }) {
                                 />
                               )}
                               <button
-                                onClick={() => openEditName(u)}
+                                onClick={() => openEditProfile(u)}
                                 className="text-white hover:text-brand transition-colors"
-                                title="Editar nome"
+                                title="Editar colaborador"
                               >
                                 <Pencil className="w-3 h-3" />
                               </button>
@@ -807,6 +841,16 @@ export default function Admin({ onBack }) {
                             'bg-slate-500/20 text-slate-400'}`}>
                           {u.level || 'Colaborador'}
                         </span>
+                      </td>
+                      <td className="px-4 py-4 hidden md:table-cell">
+                        {u.job_title
+                          ? <span className="text-slate-300 text-xs">{u.job_title}</span>
+                          : <span className="text-slate-600 text-xs italic">—</span>}
+                      </td>
+                      <td className="px-4 py-4 hidden md:table-cell">
+                        {u.celular
+                          ? <span className="text-slate-300 text-xs whitespace-nowrap">{formatCelular(u.celular)}</span>
+                          : <span className="text-slate-600 text-xs italic">—</span>}
                       </td>
                       <td className="px-4 py-4">
                         {u.is_active ? (
@@ -1086,12 +1130,12 @@ export default function Admin({ onBack }) {
         </div>
       )}
 
-      {/* ── Modal: Editar Nome ── */}
+      {/* ── Modal: Editar Colaborador (nome, função, celular) ── */}
       {editNameUser && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
           <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-sm shadow-2xl max-h-full overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-white font-bold text-lg">Editar Nome</h2>
+              <h2 className="text-white font-bold text-lg">Editar Colaborador</h2>
               <button
                 type="button"
                 onClick={() => { setEditNameUser(null); setEditNameMsg(null) }}
@@ -1102,7 +1146,7 @@ export default function Admin({ onBack }) {
             </div>
 
             <form
-              onSubmit={e => { e.preventDefault(); saveEditName() }}
+              onSubmit={e => { e.preventDefault(); saveEditProfile() }}
               className="space-y-4"
             >
               <div>
@@ -1118,6 +1162,30 @@ export default function Admin({ onBack }) {
                              rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
                 />
                 <p className="text-slate-500 text-xs mt-1">{editNameUser.email}</p>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 uppercase tracking-wider">Função</label>
+                <input
+                  type="text"
+                  value={editFuncaoValue}
+                  onChange={e => setEditFuncaoValue(e.target.value)}
+                  placeholder="Ex: Analista de RH"
+                  className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 uppercase tracking-wider">Celular</label>
+                <input
+                  type="tel"
+                  value={editCelularValue}
+                  onChange={e => setEditCelularValue(e.target.value)}
+                  placeholder="Ex: 11999999999"
+                  className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                />
               </div>
 
               {editNameMsg && (
