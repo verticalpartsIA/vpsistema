@@ -83,11 +83,17 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delaysMs = [500,
 
 // GoTrue admin não tem "get user by email" direto — pagina listUsers como o
 // _shared/platforms.ts findUserByEmail (mesma lógica, via fetch puro aqui).
+// Traz banned_until junto: a reconciliação noturna chama isto pra TODO
+// profile de uma vez, e sem saber o estado atual ela chamava banAuthUser
+// incondicionalmente pra todo mundo — 39 perfis x múltiplas chamadas de
+// admin API em paralelo estourou o rate limit do GoTrue dos satélites
+// (erro real em produção, 2026-09-21). Sabendo o estado atual, só escreve
+// quando precisa mudar.
 async function findAuthUserByEmail(
   url: string,
   key: string,
   email: string,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; banned_until?: string | null } | null> {
   const perPage = 1000
   for (let page = 1; ; page++) {
     const res = await fetch(`${url}/auth/v1/admin/users?page=${page}&per_page=${perPage}`, {
@@ -95,14 +101,28 @@ async function findAuthUserByEmail(
     })
     if (!res.ok) throw new Error(`listUsers falhou: ${await res.text()}`)
     const data = await res.json()
-    const users: Array<{ id: string; email?: string }> = data?.users ?? []
+    const users: Array<{ id: string; email?: string; banned_until?: string | null }> = data?.users ?? []
     const found = users.find((u) => u.email?.toLowerCase() === email.toLowerCase())
     if (found) return found
     if (users.length < perPage) return null
   }
 }
 
-async function banAuthUser(url: string, key: string, userId: string, isActive: boolean): Promise<void> {
+function isCurrentlyBanned(bannedUntil?: string | null): boolean {
+  if (!bannedUntil) return false
+  return new Date(bannedUntil).getTime() > Date.now()
+}
+
+// Só chama a admin API de fato quando o estado atual diverge do desejado —
+// ver comentário em findAuthUserByEmail sobre o rate limit que isto evita.
+async function banAuthUser(
+  url: string,
+  key: string,
+  userId: string,
+  isActive: boolean,
+  currentlyBanned: boolean,
+): Promise<void> {
+  if (isActive === !currentlyBanned) return
   await withRetry(async () => {
     const res = await fetch(`${url}/auth/v1/admin/users/${userId}`, {
       method: 'PUT',
@@ -182,7 +202,7 @@ async function syncPosVenda360(body: SyncBody): Promise<SyncResult> {
   if (!authUser) return { platform: 'Pós-Venda 360', status: 'not_found' }
 
   if (body.is_active !== undefined) {
-    await banAuthUser(url, key, authUser.id, body.is_active)
+    await banAuthUser(url, key, authUser.id, body.is_active, isCurrentlyBanned(authUser.banned_until))
   }
 
   // Sem coluna de e-mail em profiles — a linha é achada por user_id, não
@@ -221,7 +241,14 @@ async function syncVisitas(body: SyncBody): Promise<SyncResult> {
   if (!profile) return { platform: 'Visitas e Brindes', status: 'not_found' }
 
   if (body.is_active !== undefined) {
-    await banAuthUser(url, key, profile.id, body.is_active)
+    // Sem listUsers aqui — já temos o id via profiles, só confere o
+    // banned_until atual com um get-by-id (1 chamada, não paginado).
+    const authRes = await fetch(`${url}/auth/v1/admin/users/${profile.id}`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}` },
+    })
+    const authUser = authRes.ok ? await authRes.json() : null
+    const bannedUntil = authUser?.banned_until ?? authUser?.user?.banned_until
+    await banAuthUser(url, key, profile.id, body.is_active, isCurrentlyBanned(bannedUntil))
   }
 
   // Sem coluna de departamento nem celular neste satélite.

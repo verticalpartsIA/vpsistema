@@ -92,7 +92,12 @@ Deno.serve(async (req: Request) => {
   const profiles: Profile[] = await profilesRes.json()
 
   const started = Date.now()
-  const perProfile = await mapWithConcurrency(profiles, 5, async (profile) => {
+  // Concorrência baixa de propósito: sync-satellite-profiles agora só
+  // escreve no GoTrue quando o ban/unban realmente precisa mudar (ver
+  // isCurrentlyBanned), mas ainda faz 1 listUsers por perfil no Pós-Venda
+  // 360 — em paralelo alto isso sozinho já estourou rate limit do GoTrue
+  // com 39 perfis (produção, 2026-09-21).
+  const perProfile = await mapWithConcurrency(profiles, 3, async (profile) => {
     try {
       const res = await fetch(`${VPSISTEMA_URL}/functions/v1/sync-satellite-profiles`, {
         method: 'POST',
