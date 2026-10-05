@@ -22,35 +22,21 @@ Deno.serve(async (req) => {
     const admin = adminClient()
     const ip = clientIp(req)
 
-    // Estado do último envio: precisa existir, estar dentro dos 5 minutos e
-    // não ter sido usado nem estourado o limite de tentativas.
-    const { data: lastSend } = await admin
-      .from('whatsapp_login_attempts')
-      .select('created_at')
-      .eq('phone', phone).eq('kind', 'send')
-      .order('created_at', { ascending: false }).limit(1).maybeSingle()
-
-    if (!lastSend || Date.now() - new Date(lastSend.created_at).getTime() > CODE_TTL_MS) {
-      return json({ error: INVALID }, 401)
-    }
-
-    const { data: after } = await admin
-      .from('whatsapp_login_attempts')
-      .select('kind')
-      .eq('phone', phone).gt('created_at', lastSend.created_at)
-      .in('kind', ['verify_fail', 'verify_ok'])
-    if (after?.some(r => r.kind === 'verify_ok')) return json({ error: INVALID }, 401)
-    if ((after?.filter(r => r.kind === 'verify_fail').length ?? 0) >= MAX_VERIFY_FAILS) {
-      return json({ error: 'Muitas tentativas. Solicite um novo código.' }, 429)
-    }
-
-    const fail = async () => {
-      await admin.from('whatsapp_login_attempts').insert({ phone, kind: 'verify_fail', ip })
-      return json({ error: INVALID }, 401)
-    }
+    // Reserva a tentativa ANTES de validar o OTP, de forma atômica no banco:
+    // exige um código enviado há menos de 5 min, ainda não usado, e no máximo
+    // MAX_VERIFY_FAILS tentativas por código — mesmo com palpites concorrentes.
+    const { data: state, error: reserveErr } = await admin.rpc('whatsapp_login_reserve_verify', {
+      p_phone: phone,
+      p_ip: ip,
+      p_ttl_seconds: CODE_TTL_MS / 1000,
+      p_max_attempts: MAX_VERIFY_FAILS,
+    })
+    if (reserveErr) throw reserveErr
+    if (state === 'locked') return json({ error: 'Muitas tentativas. Solicite um novo código.' }, 429)
+    if (state !== 'ok') return json({ error: INVALID }, 401)
 
     const user = await findLoginUser(admin, phone)
-    if (!user) return await fail()
+    if (!user) return json({ error: INVALID }, 401)
 
     // Valida no GoTrue (uso único, expiração própria) com um client anônimo
     // descartável, pra não contaminar nenhuma sessão do servidor.
@@ -58,7 +44,7 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     })
     const { data, error } = await anon.auth.verifyOtp({ email: user.email, token: code, type: 'magiclink' })
-    if (error || !data?.session) return await fail()
+    if (error || !data?.session) return json({ error: INVALID }, 401)
 
     await admin.from('whatsapp_login_attempts').insert({ phone, kind: 'verify_ok', ip })
 

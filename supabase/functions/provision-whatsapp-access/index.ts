@@ -84,7 +84,9 @@ Deno.serve(async (req) => {
         email,
         password: randomPassword,
         email_confirm: true,
-        user_metadata: { name: profile.name, level: profile.level || 'Colaborador', department: profile.department || null },
+        // celular junto: o trigger de espelhamento só dispara quando o celular muda
+        // depois que a conta existe, e aqui o perfil já tinha o número.
+        user_metadata: { name: profile.name, level: profile.level || 'Colaborador', department: profile.department || null, celular: phone },
       })
       if (createErr) {
         console.error('provision-whatsapp-access: createUser falhou:', createErr.message)

@@ -21,28 +21,22 @@ Deno.serve(async (req) => {
 
     const admin = adminClient()
     const ip = clientIp(req)
-    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
-    // Rate limit. O envio é registrado para QUALQUER número válido (existindo
-    // ou não), senão o 429 revelaria quais números são de colaboradores.
-    const { count: phoneSends } = await admin
-      .from('whatsapp_login_attempts')
-      .select('id', { count: 'exact', head: true })
-      .eq('phone', phone).eq('kind', 'send').gte('created_at', since)
-    if ((phoneSends ?? 0) >= MAX_SENDS_PER_PHONE_HOUR) {
+    // Rate limit atômico: a checagem e a reserva da vaga acontecem na mesma
+    // transação do banco (advisory lock), antes de gerar/enviar o código —
+    // requisições concorrentes não furam o limite. A vaga é reservada para
+    // QUALQUER número válido (existindo ou não), senão o 429 revelaria quais
+    // números são de colaboradores.
+    const { data: reserved, error: reserveErr } = await admin.rpc('whatsapp_login_reserve_send', {
+      p_phone: phone,
+      p_ip: ip,
+      p_max_phone: MAX_SENDS_PER_PHONE_HOUR,
+      p_max_ip: MAX_SENDS_PER_IP_HOUR,
+    })
+    if (reserveErr) throw reserveErr
+    if (!reserved) {
       return json({ error: 'Muitas solicitações. Aguarde alguns minutos e tente novamente.' }, 429)
     }
-    if (ip) {
-      const { count: ipSends } = await admin
-        .from('whatsapp_login_attempts')
-        .select('id', { count: 'exact', head: true })
-        .eq('ip', ip).eq('kind', 'send').gte('created_at', since)
-      if ((ipSends ?? 0) >= MAX_SENDS_PER_IP_HOUR) {
-        return json({ error: 'Muitas solicitações. Aguarde alguns minutos e tente novamente.' }, 429)
-      }
-    }
-
-    await admin.from('whatsapp_login_attempts').insert({ phone, kind: 'send', ip })
 
     const user = await findLoginUser(admin, phone)
     if (!user) return json({ success: true })
