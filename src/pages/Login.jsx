@@ -1,18 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { PHONE_LOGIN_ENABLED } from '../lib/features'
-import { Mail, Lock, Loader2, AlertCircle, Eye, EyeOff, CheckCircle, Check, Smartphone } from 'lucide-react'
-
-// (11) 91234-5678 enquanto digita; aceita colar com +55 e ignora o resto.
-function formatPhoneInput(value) {
-  let d = value.replace(/\D/g, '')
-  if (d.length > 11 && d.startsWith('55')) d = d.slice(2)
-  d = d.slice(0, 11)
-  if (d.length <= 2) return d
-  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`
-  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
-  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
-}
+import { Mail, Lock, Loader2, AlertCircle, Eye, EyeOff, CheckCircle, Check } from 'lucide-react'
 
 // ── Painel esquerdo — identidade da marca ────────────────────────────────────
 function BrandPanel() {
@@ -112,13 +100,12 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
   const [showPass,     setShowPass]     = useState(false)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState('')
-  // Padrão é o login por código no WhatsApp; e-mail + senha ('login') fica como
-  // contingência (administradores / WhatsApp fora do ar).
-  const [mode,         setMode]         = useState(forceMode || (PHONE_LOGIN_ENABLED ? 'wpp' : 'login'))
-  const [wppPhone,     setWppPhone]     = useState('')
-  const [wppCode,      setWppCode]      = useState('')
-  const [wppLoading,   setWppLoading]   = useState(false)
-  const [wppCooldown,  setWppCooldown]  = useState(0)
+  const [mode,         setMode]         = useState(forceMode || 'login')
+  // 2º fator: código enviado por WhatsApp depois de e-mail + senha corretos.
+  const [tfChallenge,  setTfChallenge]  = useState(null)   // { challengeId, phoneHint }
+  const [tfCode,       setTfCode]       = useState('')
+  const [tfLoading,    setTfLoading]    = useState(false)
+  const [tfCooldown,   setTfCooldown]   = useState(0)
   const [resetSent,    setResetSent]    = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
   const [otpCode,      setOtpCode]      = useState('')
@@ -135,57 +122,41 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
 
   // Contagem regressiva do "Reenviar código".
   useEffect(() => {
-    if (wppCooldown <= 0) return
-    const t = setTimeout(() => setWppCooldown(c => c - 1), 1000)
+    if (tfCooldown <= 0) return
+    const t = setTimeout(() => setTfCooldown(c => c - 1), 1000)
     return () => clearTimeout(t)
-  }, [wppCooldown])
+  }, [tfCooldown])
 
-  // ── Login por código no WhatsApp ─────────────────────────────────────────
-
-  async function requestWppCode(e) {
-    e?.preventDefault()
-    setError('')
-    setWppLoading(true)
-    const { data, error: invokeError } = await supabase.functions.invoke('whatsapp-login-request', {
-      body: { phone: wppPhone },
+  // Abre a sessão com os tokens devolvidos pelo servidor (SIGNED_IN dispara em App.jsx).
+  async function openSession(tokens) {
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
     })
-    setWppLoading(false)
-    const err = invokeError || data?.error
-    if (err) {
-      const status = invokeError?.context?.status
-      setError(status === 429
-        ? 'Muitas solicitações em pouco tempo. Aguarde alguns minutos e tente novamente.'
-        : (status === 400 || data?.error) ? 'Informe o celular com DDD.'
-        : 'Não foi possível enviar o código. Tente novamente em instantes.')
-      return
-    }
-    setWppCode('')
-    setWppCooldown(30)
-    setMode('wpp-code')
+    if (sessionError) { setError('Não foi possível iniciar a sessão. Tente novamente.'); return false }
+    setPassword('')
+    setTfChallenge(null)
+    setTfCode('')
+    return true
   }
 
-  async function verifyWppCode(e) {
+  // Passo 2: confere o código recebido por WhatsApp.
+  async function verifyTwoFactor(e) {
     e.preventDefault()
     setError('')
-    setWppLoading(true)
-    const { data, error: invokeError } = await supabase.functions.invoke('whatsapp-login-verify', {
-      body: { phone: wppPhone, code: wppCode },
+    setTfLoading(true)
+    const { data, error: invokeError } = await supabase.functions.invoke('login-verify', {
+      body: { challenge_id: tfChallenge?.challengeId, code: tfCode },
     })
-    if (invokeError || !data?.access_token) {
-      setWppLoading(false)
-      const status = invokeError?.context?.status
-      setError(status === 429
-        ? 'Muitas tentativas. Solicite um novo código.'
-        : 'Código inválido ou expirado. Solicite um novo código.')
+    let payload = data
+    if (invokeError && !payload) { try { payload = await invokeError.context.json() } catch { /* sem corpo */ } }
+    if (!payload?.access_token) {
+      setError(payload?.error || 'Código inválido ou expirado. Entre novamente para receber um novo código.')
+      setTfLoading(false)
       return
     }
-    const { error: sessionError } = await supabase.auth.setSession({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-    })
-    setWppLoading(false)
-    if (sessionError) setError('Não foi possível iniciar a sessão. Tente novamente.')
-    // SIGNED_IN dispara em App.jsx e leva ao dashboard.
+    await openSession(payload)
+    setTfLoading(false)
   }
 
   // ── Lógica de auth (inalterada) ──────────────────────────────────────────
@@ -209,10 +180,8 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
     }, 2500)
   }
 
-  async function handleLogin(e) {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
+  // Login direto (contas ainda sem 2FA ativo). O servidor decide: 'legacy' = sem 2FA.
+  async function legacyLogin() {
     const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password })
     if (authError) { setError('E-mail ou senha inválidos. Tente novamente.'); setLoading(false); return }
     const { data: profile } = await supabase.from('profiles').select('is_active').eq('id', data.user.id).single()
@@ -222,6 +191,30 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
       setLoading(false)
       return
     }
+    setPassword('')
+    setLoading(false)
+  }
+
+  // Passo 1: o servidor confere e-mail + senha e, se corretos, envia o código por WhatsApp.
+  async function handleLogin(e) {
+    e?.preventDefault()
+    setError('')
+    setLoading(true)
+    const { data, error: fnError } = await supabase.functions.invoke('login-start', { body: { email, password } })
+    let payload = data
+    if (fnError && !payload) { try { payload = await fnError.context.json() } catch { /* sem corpo */ } }
+
+    if (payload?.mode === 'legacy') { await legacyLogin(); return }
+    if (payload?.mode === 'session') { await openSession(payload); setLoading(false); return }
+    if (payload?.mode === 'code') {
+      setTfChallenge({ challengeId: payload.challenge_id, phoneHint: payload.phone_hint })
+      setTfCode('')
+      setTfCooldown(30)
+      setMode('twofa')
+      setLoading(false)
+      return
+    }
+    setError(payload?.error || 'Não foi possível entrar agora. Tente novamente.')
     setLoading(false)
   }
 
@@ -310,66 +303,36 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
 
   const rightContent = {
 
-    wpp: (
+    twofa: (
       <>
         <div className="mb-8">
           <p className="mb-1 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand before:h-0.5 before:w-5 before:bg-brand before:content-['']">
-            Acessar conta
-          </p>
-          <h2 className="text-3xl font-extrabold tracking-tight text-black">Entrar na plataforma</h2>
-          <p className="mt-2 text-sm text-neutral-500">
-            Informe seu celular e enviaremos um código de acesso pelo WhatsApp.
-          </p>
-        </div>
-        <form onSubmit={requestWppCode} className="space-y-4" autoComplete="off">
-          <Field label="Celular (WhatsApp)" type="tel" name="vp-celular" value={wppPhone}
-            onChange={e => setWppPhone(formatPhoneInput(e.target.value))}
-            placeholder="(11) 91234-5678" required icon={<Smartphone className="h-4 w-4" />}
-            autoComplete="tel-national" />
-          <NoticeBox />
-          <ErrorBox />
-          <SubmitBtn disabled={wppLoading || wppPhone.replace(/\D/g, '').length < 10}>
-            {wppLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Enviando...</> : 'Enviar código →'}
-          </SubmitBtn>
-          <div className="text-center">
-            <button type="button" onClick={() => { setMode('login'); setError('') }}
-              className="text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
-              Entrar com e-mail e senha
-            </button>
-          </div>
-        </form>
-      </>
-    ),
-
-    'wpp-code': (
-      <>
-        <div className="mb-8">
-          <p className="mb-1 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand before:h-0.5 before:w-5 before:bg-brand before:content-['']">
-            Código de acesso
+            Verificação em duas etapas
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight text-black">Digite o código</h2>
           <p className="mt-2 text-sm text-neutral-500">
-            Se o número <span className="font-semibold text-black">{wppPhone}</span> estiver cadastrado,
-            você receberá um código no WhatsApp. Ele vale por 5 minutos.
+            Enviamos um código de 6 dígitos por WhatsApp para{' '}
+            <span className="font-semibold text-black">{tfChallenge?.phoneHint}</span>. Ele vale por 5 minutos.
           </p>
         </div>
-        <form onSubmit={verifyWppCode} className="space-y-4" autoComplete="off">
-          <Field label="Código" type="text" name="vp-wpp-code" value={wppCode}
-            onChange={e => setWppCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
-            placeholder="00000000" required icon={<CheckCircle className="h-4 w-4" />}
+        <form onSubmit={verifyTwoFactor} className="space-y-4" autoComplete="off">
+          <Field label="Código" type="text" name="vp-2fa-code" value={tfCode}
+            onChange={e => setTfCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000" required icon={<CheckCircle className="h-4 w-4" />}
             autoComplete="one-time-code" />
           <ErrorBox />
-          <SubmitBtn disabled={wppLoading || wppCode.length < 6}>
-            {wppLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verificando...</> : 'Entrar →'}
+          <SubmitBtn disabled={tfLoading || tfCode.length !== 6}>
+            {tfLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verificando...</> : 'Entrar →'}
           </SubmitBtn>
           <div className="text-center space-y-2">
-            <button type="button" disabled={wppLoading || wppCooldown > 0} onClick={requestWppCode}
+            <button type="button" disabled={loading || tfCooldown > 0} onClick={() => handleLogin()}
               className="block w-full text-xs font-semibold text-neutral-500 transition-colors hover:text-brand disabled:cursor-not-allowed disabled:opacity-60">
-              {wppCooldown > 0 ? `Reenviar código em ${wppCooldown}s` : 'Reenviar código'}
+              {tfCooldown > 0 ? `Reenviar código em ${tfCooldown}s` : 'Reenviar código'}
             </button>
-            <button type="button" onClick={() => { setMode('wpp'); setWppCode(''); setError('') }}
+            <button type="button"
+              onClick={() => { setMode('login'); setTfChallenge(null); setTfCode(''); setPassword(''); setError('') }}
               className="text-xs font-semibold text-neutral-500 transition-colors hover:text-black">
-              ← Usar outro número
+              ← Voltar para o login
             </button>
           </div>
         </form>
@@ -406,15 +369,6 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
               className="text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
               Esqueceu a senha?
             </button>
-            {PHONE_LOGIN_ENABLED && (
-              <>
-              <span className="mx-2 text-neutral-300">·</span>
-              <button type="button" onClick={() => { setMode('wpp'); setError('') }}
-                className="text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
-                Entrar com código no WhatsApp
-              </button>
-              </>
-            )}
           </div>
         </form>
       </>

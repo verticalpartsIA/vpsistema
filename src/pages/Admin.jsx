@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logActivity } from '../lib/activityLog'
-import { PHONE_LOGIN_ENABLED } from '../lib/features'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
   CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
-  ChevronRight, ChevronDown, Star, MessageCircle
+  ChevronRight, ChevronDown, Star
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
@@ -101,7 +100,6 @@ export default function Admin({ onBack }) {
 
   // Feedback inline
   const [actionMsg, setActionMsg] = useState(null)
-  const [provisioningId, setProvisioningId] = useState(null)
 
   // Mapa de BLOQUEIOS: { [userId]: string[] }
   // Sem entrada (ou array vazio) = acesso total. O acesso é liberado por
@@ -524,49 +522,6 @@ export default function Admin({ onBack }) {
     setTimeout(() => setActionMsg(null), 4000)
   }
 
-  // E-mail técnico: identidade interna de quem entra só por WhatsApp.
-  const isWhatsappOnly = (u) => (u.email || '').endsWith('@wpp.vpsistema.com')
-  const canProvisionWhatsapp = (u) => PHONE_LOGIN_ENABLED && Boolean(u.celular) && u.is_active !== false && (u.is_placeholder || isWhatsappOnly(u))
-
-  // Cria a conta (se ainda não existe) e manda o link de primeiro acesso por
-  // WhatsApp. Também serve para reenviar o link.
-  async function handleProvisionWhatsapp(u) {
-    setProvisioningId(u.id)
-    setActionMsg(null)
-    const { data, error } = await supabase.functions.invoke('provision-whatsapp-access', {
-      body: { profile_id: u.id },
-    })
-    let payload = data
-    if (error && !payload) {
-      try { payload = await error.context.json() } catch { /* corpo não-JSON */ }
-    }
-    setProvisioningId(null)
-
-    if (error || payload?.error) {
-      const msg = payload?.error || error?.message || 'Erro ao criar o acesso.'
-      setActionMsg({ type: 'error', text: msg })
-      logActivity({ action: 'provision_whatsapp_access_failed', target: u.name, details: { erro: msg } })
-      setTimeout(() => setActionMsg(null), 7000)
-      return
-    }
-
-    if (payload?.whatsapp_sent) {
-      setActionMsg({ type: 'success', text: `Acesso ${payload.created ? 'criado' : 'reenviado'} para ${u.name}: link de primeiro acesso enviado por WhatsApp (vale 48 horas).` })
-    } else {
-      setActionMsg({
-        type: 'error',
-        text: `Acesso ${payload?.created ? 'criado' : 'atualizado'} para ${u.name}, mas o WhatsApp NÃO foi enviado (${payload?.whatsapp_error || 'erro desconhecido'}). Link para entregar manualmente: ${payload?.access_link}`,
-      })
-    }
-    logActivity({
-      action: 'provision_whatsapp_access',
-      target: u.name,
-      details: { criado: Boolean(payload?.created), whatsapp_enviado: Boolean(payload?.whatsapp_sent) },
-    })
-    loadAll()
-    setTimeout(() => setActionMsg(null), payload?.whatsapp_sent ? 5000 : 60000)
-  }
-
   async function handleAvatarUpdate(userId, file) {
     if (!file) return
     setAvatarUploading(prev => ({ ...prev, [userId]: true }))
@@ -955,23 +910,6 @@ export default function Admin({ onBack }) {
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {canProvisionWhatsapp(u) && (
-                            <button
-                              onClick={() => handleProvisionWhatsapp(u)}
-                              disabled={provisioningId === u.id}
-                              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border
-                                         border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors
-                                         disabled:opacity-60 disabled:cursor-not-allowed"
-                              title={u.is_placeholder
-                                ? 'Cria o login e envia o link de primeiro acesso por WhatsApp'
-                                : 'Reenvia o link de primeiro acesso por WhatsApp'}
-                            >
-                              {provisioningId === u.id
-                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                : <MessageCircle className="w-3.5 h-3.5" />}
-                              {u.is_placeholder ? 'Criar acesso' : 'Reenviar acesso'}
-                            </button>
-                          )}
                           <button
                             onClick={() => openPerms(u)}
                             className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border

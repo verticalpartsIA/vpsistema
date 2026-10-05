@@ -25,9 +25,6 @@ function App() {
   // rede oscilou, aba ficou suspensa). A sessão não é persistida por decisão
   // de segurança, então não dá para recuperá-la — mas dá para explicar.
   const [sessionLost, setSessionLost] = useState(false)
-  // Link de primeiro acesso (?acesso=TOKEN, enviado por WhatsApp) inválido,
-  // expirado ou já usado.
-  const [accessLinkError, setAccessLinkError] = useState(false)
   const signingOutRef = useRef(false)
   // Alguém digitou algo nesta aba? Se sim, recarregar sozinho jogaria fora um
   // convite ou uma edição em andamento.
@@ -50,16 +47,6 @@ function App() {
       setIsRecovery(true)
     }
 
-    // Primeiro acesso por WhatsApp: tira o token da URL na hora (não fica no
-    // histórico nem vaza em compartilhamento de tela) e troca por sessão.
-    const params = new URLSearchParams(window.location.search)
-    const acessoToken = params.get('acesso')
-    if (acessoToken) {
-      params.delete('acesso')
-      const qs = params.toString()
-      window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash)
-    }
-
     supabase.auth.getSession().then(({ data: { session } }) => {
       loggedUserIdRef.current = session?.user?.id ?? null
       // Esta aba já teve sessão e agora não tem mais (recarregou, ou o refresh
@@ -70,9 +57,7 @@ function App() {
         sessionStorage.removeItem(SESSION_FLAG)
       }
       setUser(session?.user ?? null)
-      // Com token de acesso na URL, segura a tela de carregamento até a troca
-      // terminar (senão a tela de login piscaria antes de entrar).
-      if (!acessoToken) setLoading(false)
+      setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -104,22 +89,6 @@ function App() {
         setIsRecovery(false)
       }
     })
-
-    if (acessoToken) {
-      supabase.functions.invoke('whatsapp-first-access', { body: { token: acessoToken } })
-        .then(async ({ data, error }) => {
-          if (error || !data?.access_token) {
-            setAccessLinkError(true)
-          } else {
-            const { error: sessionError } = await supabase.auth.setSession({
-              access_token: data.access_token,
-              refresh_token: data.refresh_token,
-            })
-            if (sessionError) setAccessLinkError(true)
-          }
-          setLoading(false)
-        })
-    }
 
     return () => subscription.unsubscribe()
   }, [])
@@ -164,17 +133,26 @@ function App() {
 
     // Fluxo de recuperação de senha — mostra formulário mesmo com sessão ativa
     if (isRecovery) {
-      return <Login forceMode="reset" onResetDone={() => setIsRecovery(false)} />
+      return (
+        <Login
+          forceMode="reset"
+          onResetDone={async () => {
+            // A sessão de recuperação vem só do e-mail: encerra e exige o login completo
+            // (e-mail + senha + código por WhatsApp).
+            signingOutRef.current = true
+            await supabase.auth.signOut()
+            setIsRecovery(false)
+          }}
+        />
+      )
     }
 
     if (!user) {
       return (
         <Login
-          notice={accessLinkError
-            ? 'Link inválido, expirado ou já utilizado. Informe seu celular para receber um código de acesso.'
-            : sessionLost
-              ? 'Sua sessão expirou e você precisa entrar de novo. Por segurança, o portal não guarda a sessão em cache.'
-              : null}
+          notice={sessionLost
+            ? 'Sua sessão expirou e você precisa entrar de novo. Por segurança, o portal não guarda a sessão em cache.'
+            : null}
         />
       )
     }
