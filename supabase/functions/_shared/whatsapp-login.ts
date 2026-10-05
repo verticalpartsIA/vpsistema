@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 
 export const CODE_TTL_MS = 5 * 60 * 1000
 export const MAX_VERIFY_FAILS = 5

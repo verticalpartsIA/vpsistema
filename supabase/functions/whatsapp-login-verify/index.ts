@@ -1,7 +1,7 @@
 // Passo 2 do login por código: confere o código recebido no WhatsApp e devolve
 // a sessão (access_token + refresh_token) para o front fazer setSession().
 // Chamada ANTES do login → deploy com verify_jwt = false.
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 import { normalizePhoneBR } from '../_shared/whatsapp.ts'
 import {
   CODE_TTL_MS, MAX_VERIFY_FAILS,
