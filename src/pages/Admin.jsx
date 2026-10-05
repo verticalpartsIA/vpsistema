@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logActivity } from '../lib/activityLog'
+import { PHONE_LOGIN_ENABLED } from '../lib/features'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
   CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
@@ -525,7 +526,7 @@ export default function Admin({ onBack }) {
 
   // E-mail técnico: identidade interna de quem entra só por WhatsApp.
   const isWhatsappOnly = (u) => (u.email || '').endsWith('@wpp.vpsistema.com')
-  const canProvisionWhatsapp = (u) => Boolean(u.celular) && u.is_active !== false && (u.is_placeholder || isWhatsappOnly(u))
+  const canProvisionWhatsapp = (u) => PHONE_LOGIN_ENABLED && Boolean(u.celular) && u.is_active !== false && (u.is_placeholder || isWhatsappOnly(u))
 
   // Cria a conta (se ainda não existe) e manda o link de primeiro acesso por
   // WhatsApp. Também serve para reenviar o link.

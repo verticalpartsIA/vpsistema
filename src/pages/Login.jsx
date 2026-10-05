@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { PHONE_LOGIN_ENABLED } from '../lib/features'
 import { Mail, Lock, Loader2, AlertCircle, Eye, EyeOff, CheckCircle, Check, Smartphone } from 'lucide-react'
 
 // (11) 91234-5678 enquanto digita; aceita colar com +55 e ignora o resto.
@@ -113,7 +114,7 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
   const [error,        setError]        = useState('')
   // Padrão é o login por código no WhatsApp; e-mail + senha ('login') fica como
   // contingência (administradores / WhatsApp fora do ar).
-  const [mode,         setMode]         = useState(forceMode || 'wpp')
+  const [mode,         setMode]         = useState(forceMode || (PHONE_LOGIN_ENABLED ? 'wpp' : 'login'))
   const [wppPhone,     setWppPhone]     = useState('')
   const [wppCode,      setWppCode]      = useState('')
   const [wppLoading,   setWppLoading]   = useState(false)
@@ -405,11 +406,15 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
               className="text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
               Esqueceu a senha?
             </button>
-            <span className="mx-2 text-neutral-300">·</span>
-            <button type="button" onClick={() => { setMode('wpp'); setError('') }}
-              className="text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
-              Entrar com código no WhatsApp
-            </button>
+            {PHONE_LOGIN_ENABLED && (
+              <>
+              <span className="mx-2 text-neutral-300">·</span>
+              <button type="button" onClick={() => { setMode('wpp'); setError('') }}
+                className="text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
+                Entrar com código no WhatsApp
+              </button>
+              </>
+            )}
           </div>
         </form>
       </>
