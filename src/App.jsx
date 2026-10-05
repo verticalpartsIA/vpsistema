@@ -18,8 +18,6 @@ function App() {
   const [user,       setUser]       = useState(null)
   const [loading,    setLoading]    = useState(true)
   const [view,       setView]       = useState('dashboard') // 'dashboard' | 'admin' | 'ceo' | 'logs'
-  const [isRecovery, setIsRecovery] = useState(false)
-  const [linkExpired, setLinkExpired] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   // Sessão caiu sem a pessoa ter clicado em "Sair" (refresh de token falhou,
   // rede oscilou, aba ficou suspensa). A sessão não é persistida por decisão
@@ -34,17 +32,9 @@ function App() {
   const loggedUserIdRef = useRef(null)
 
   useEffect(() => {
-    const hash = window.location.hash
-
-    // Hash com erro de token expirado (fluxo implicit legado)
-    if (hash.includes('error_code=otp_expired') || hash.includes('error=access_denied')) {
+    // Links de convite/recuperação por e-mail foram desativados: o hash não abre mais sessão.
+    if (window.location.hash.includes('access_token') || window.location.hash.includes('error_code')) {
       window.history.replaceState({}, '', window.location.pathname)
-      setLinkExpired(true)
-      setLoading(false)
-      return
-    }
-    if (hash.includes('type=invite') || hash.includes('type=recovery')) {
-      setIsRecovery(true)
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -61,11 +51,7 @@ function App() {
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsRecovery(true)
-        setUser(session?.user ?? null)
-        return
-      }
+      if (event === 'PASSWORD_RECOVERY') return  // recuperação por link foi desativada
       if (event === 'SIGNED_IN') {
         const uid = session?.user?.id ?? null
         if (uid && uid !== loggedUserIdRef.current) {
@@ -86,7 +72,6 @@ function App() {
       setUser(session?.user ?? null)
       if (!session?.user) {
         setView('dashboard')
-        setIsRecovery(false)
       }
     })
 
@@ -126,27 +111,6 @@ function App() {
   )
 
   function renderView() {
-    // Link de recuperação expirado — volta para login com aviso
-    if (linkExpired) {
-      return <Login forceMode="expired" onExpiredDismiss={() => setLinkExpired(false)} />
-    }
-
-    // Fluxo de recuperação de senha — mostra formulário mesmo com sessão ativa
-    if (isRecovery) {
-      return (
-        <Login
-          forceMode="reset"
-          onResetDone={async () => {
-            // A sessão de recuperação vem só do e-mail: encerra e exige o login completo
-            // (e-mail + senha + código por WhatsApp).
-            signingOutRef.current = true
-            await supabase.auth.signOut()
-            setIsRecovery(false)
-          }}
-        />
-      )
-    }
-
     if (!user) {
       return (
         <Login
