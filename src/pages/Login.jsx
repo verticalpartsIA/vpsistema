@@ -349,16 +349,16 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
           <h2 className="text-3xl font-extrabold tracking-tight text-black">Digite o código</h2>
           <p className="mt-2 text-sm text-neutral-500">
             Se o número <span className="font-semibold text-black">{wppPhone}</span> estiver cadastrado,
-            você receberá um código de 6 dígitos no WhatsApp. Ele vale por 5 minutos.
+            você receberá um código no WhatsApp. Ele vale por 5 minutos.
           </p>
         </div>
         <form onSubmit={verifyWppCode} className="space-y-4" autoComplete="off">
           <Field label="Código" type="text" name="vp-wpp-code" value={wppCode}
-            onChange={e => setWppCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="000000" required icon={<CheckCircle className="h-4 w-4" />}
+            onChange={e => setWppCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+            placeholder="00000000" required icon={<CheckCircle className="h-4 w-4" />}
             autoComplete="one-time-code" />
           <ErrorBox />
-          <SubmitBtn disabled={wppLoading || wppCode.length !== 6}>
+          <SubmitBtn disabled={wppLoading || wppCode.length < 6}>
             {wppLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verificando...</> : 'Entrar →'}
           </SubmitBtn>
           <div className="text-center space-y-2">

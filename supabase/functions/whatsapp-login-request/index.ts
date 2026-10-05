@@ -1,4 +1,4 @@
-// Passo 1 do login por código: recebe o celular e manda um código de 6 dígitos
+// Passo 1 do login por código: recebe o celular e manda um código numérico
 // por WhatsApp. Chamada ANTES do login → deploy com verify_jwt = false.
 //
 // O código é o email_otp de um magiclink do GoTrue (uso único, validado por

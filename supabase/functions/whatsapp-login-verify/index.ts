@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
     const { phone: rawPhone, code: rawCode } = await req.json()
     const phone = normalizePhoneBR(rawPhone)
     const code = String(rawCode ?? '').replace(/\D/g, '')
-    if (!phone || code.length !== 6) return json({ error: INVALID }, 400)
+    if (!phone || code.length < 6 || code.length > 8) return json({ error: INVALID }, 400)
 
     const admin = adminClient()
     const ip = clientIp(req)
