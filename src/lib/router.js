@@ -12,10 +12,11 @@ export const ROUTES = {
   admin:     '/administracao',
   ceo:       '/painel-executivo',
   logs:      '/historico',
+  eventos:   '/eventos',
 }
 
 // Telas de administração (regras de quem abre cada uma ficam no App.jsx)
-export const ADMIN_PATHS = [ROUTES.admin, ROUTES.ceo, ROUTES.logs]
+export const ADMIN_PATHS = [ROUTES.admin, ROUTES.ceo, ROUTES.logs, ROUTES.eventos]
 
 const KNOWN = Object.values(ROUTES)
 

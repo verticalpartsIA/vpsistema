@@ -5,6 +5,7 @@ import Dashboard    from './pages/Dashboard'
 import Admin        from './pages/Admin'
 import CeoDashboard from './pages/CeoDashboard'
 import ActivityLog  from './pages/ActivityLog'
+import Eventos      from './pages/Eventos'
 import { logActivity } from './lib/activityLog'
 import { watchForNewVersion } from './lib/versionWatch'
 import UpdateToast from './components/UpdateToast'
@@ -18,10 +19,10 @@ const SESSION_FLAG = 'vp_sessao_ativa'
 function App() {
   const [user,       setUser]       = useState(null)
   const [loading,    setLoading]    = useState(true)
-  const path = usePath() // '/' (login) | '/inicio' | '/administracao' | '/painel-executivo' | '/historico'
+  const path = usePath() // '/' (login) | '/inicio' | '/administracao' | '/painel-executivo' | '/historico' | '/eventos'
   // Cargo e poder do perfil (undefined = carregando).
   //  • /administracao     → quem tem nível de poder (plenos | medios | baixos)
-  //  • /painel-executivo e /historico → cargo Administrador (como antes)
+  //  • /painel-executivo, /historico e /eventos → cargo Administrador (como antes)
   const [access,     setAccess]     = useState(undefined)
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
@@ -165,6 +166,7 @@ function App() {
     if (target === ROUTES.admin) logActivity({ action: 'admin_access' })
     if (target === ROUTES.ceo)   logActivity({ action: 'ceo_access' })
     if (target === ROUTES.logs)  logActivity({ action: 'log_access' })
+    if (target === ROUTES.eventos) logActivity({ action: 'eventos_access' })
   }, [target])
 
   if (loading) {
@@ -237,6 +239,10 @@ function App() {
       return <ActivityLog onBack={backToDashboard} />
     }
 
+    if (target === ROUTES.eventos) {
+      return <Eventos onBack={backToDashboard} />
+    }
+
     return (
       <Dashboard
         user={user}
@@ -244,6 +250,7 @@ function App() {
         onNavigateAdmin={() => navigate(ROUTES.admin)}
         onNavigateCeo={()   => navigate(ROUTES.ceo)}
         onNavigateLogs={()  => navigate(ROUTES.logs)}
+        onNavigateEventos={() => navigate(ROUTES.eventos)}
       />
     )
   }

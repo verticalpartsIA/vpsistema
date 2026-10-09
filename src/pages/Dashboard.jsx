@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { LogOut, User, Loader2, Lock, X, Users, BarChart2, ClipboardList, ExternalLink } from 'lucide-react'
+import { LogOut, User, Loader2, Lock, X, Users, BarChart2, ClipboardList, Radio, ExternalLink } from 'lucide-react'
 import ModuleCard from '../components/ModuleCard'
 import { logActivity } from '../lib/activityLog'
 import { ADMIN_CARD_IMAGES } from '../lib/cardImages'
 
 
-export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavigateLogs, onSignOutStart }) {
+export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavigateLogs, onNavigateEventos, onSignOutStart }) {
   const [modules,  setModules]  = useState([])
   const [profile,  setProfile]  = useState(null)
   const [loading,  setLoading]  = useState(true)
@@ -285,6 +285,36 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
                   </p>
                   <div className="mt-4 flex items-center gap-1 text-xs font-medium text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity">
                     <span>Ver histórico</span>
+                  </div>
+                </div>
+              </button>
+            )}
+
+            {isAdmin && (
+              <button
+                onClick={onNavigateEventos}
+                className="group relative overflow-hidden bg-surface-card border border-surface-border
+                           hover:border-violet-500/40 rounded-2xl p-6 text-left
+                           transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5
+                           focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+              >
+                <div className="absolute inset-0 bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
+                     style={{ backgroundImage: `url(${ADMIN_CARD_IMAGES.eventos})` }} />
+                <div className="absolute inset-0 bg-black/65 group-hover:bg-black/55 transition-colors duration-300" />
+                <div className="relative z-10">
+                  <div className="absolute inset-x-0 -top-6 h-1 bg-violet-500 opacity-70 group-hover:opacity-100 transition-opacity" />
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-violet-500/25 transition-transform group-hover:scale-110" style={{ boxShadow: '0 0 0 1px #8B5CF630' }}>
+                    <Radio className="w-6 h-6 text-violet-400" />
+                  </div>
+                  <h3 className="text-white font-semibold text-base mb-1 group-hover:text-violet-400 transition-colors">
+                    Central de Eventos
+                    <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide bg-violet-500/25 text-violet-300 rounded px-1.5 py-0.5">Novo</span>
+                  </h3>
+                  <p className="text-slate-300 text-xs leading-relaxed opacity-80">
+                    Gatilhos, comunicações e envios dos sistemas
+                  </p>
+                  <div className="mt-4 flex items-center gap-1 text-xs font-medium text-violet-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>Abrir central</span>
                   </div>
                 </div>
               </button>

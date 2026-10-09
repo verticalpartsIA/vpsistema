@@ -14,6 +14,7 @@ const ACTION_META = {
   change_permissions:  { label: 'Permissões editadas',icon: Shield,      color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20' },
   admin_access:        { label: 'Painel Admin',       icon: Shield,      color: 'text-amber-400',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20' },
   ceo_access:          { label: 'Painel Executivo',   icon: BarChart2,   color: 'text-green-400',  bg: 'bg-green-500/10',  border: 'border-green-500/20' },
+  eventos_access:      { label: 'Central de Eventos', icon: Activity,    color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/20' },
   log_access:          { label: 'Activity Log',       icon: ClipboardList,color:'text-sky-400',    bg: 'bg-sky-500/10',    border: 'border-sky-500/20' },
 }
 

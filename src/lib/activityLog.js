@@ -6,7 +6,7 @@ import { supabase } from './supabase'
  *
  * @param {object} opts
  * @param {string} opts.action   - 'login' | 'logout' | 'module_access' | 'invite_user' |
- *                                 'change_permissions' | 'admin_access' | 'ceo_access' | 'log_access' |
+ *                                 'change_permissions' | 'admin_access' | 'ceo_access' | 'log_access' | 'eventos_access' |
  *                                 'edit_name' | 'delete_user'
  * @param {string} [opts.target] - módulo acessado, e-mail convidado, etc.
  * @param {object} [opts.details]- dados extras (jsonb)
