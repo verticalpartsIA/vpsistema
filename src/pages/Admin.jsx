@@ -4,7 +4,7 @@ import { logActivity } from '../lib/activityLog'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
   CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
-  ChevronRight, ChevronDown, Star, KeyRound, Lock, LockOpen, Puzzle
+  ChevronRight, ChevronDown, Star, KeyRound, Lock, LockOpen, Puzzle, Repeat
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
@@ -107,6 +107,11 @@ export default function Admin({ onBack }) {
   const [origValEx,     setOrigValEx]     = useState(new Map())
   const [openSystems,   setOpenSystems]   = useState(new Set())  // sistemas com a árvore aberta
   const [openModules,   setOpenModules]   = useState(new Set())  // "sistema|módulo" abertos
+  // Substituição temporária (férias): ciência/aprovação do titular passam a outra pessoa
+  const [substs,        setSubsts]        = useState([])
+  const emptySub = { system_slug: '', tipo: 'ciencia', substituto_id: '', inicio: '', fim: '', motivo: '', titular_mantem: true, herda_nivel: true }
+  const [newSub,        setNewSub]        = useState(emptySub)
+  const [subMsg,        setSubMsg]        = useState(null)
   const [permValues,    setPermValues]    = useState('nenhum') // valores R$: 'nenhum' | 'todos'
   const [permSlugs,     setPermSlugs]     = useState([])     // slugs marcados ([] = acesso pleno)
   const [permFull,      setPermFull]      = useState(true)   // toggle "acesso total"
@@ -196,6 +201,46 @@ export default function Admin({ onBack }) {
     setPermValEx(prev => { const next = new Map(prev); if (next.has(k)) next.delete(k); else next.set(k, allow); return next })
   }
   function toggleOpen(setter, key) { setter(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n }) }
+
+  // ── Substituição temporária ──────────────────────────────────────────────
+  // Sistemas que têm ciência/aprovação no catálogo (hoje: VPRequisições)
+  const substSystems = [...new Set(catalog.modules.filter(m => m.module_key === 'ciencia' || m.module_key === 'aprovacao').map(m => m.system_slug))]
+  async function loadSubsts(titularId) {
+    const today = new Date().toISOString().slice(0, 10)
+    const { data } = await supabase.from('alcada_substitutions').select('*')
+      .eq('titular_id', titularId).is('cancelado_em', null).gte('fim', today).order('inicio')
+    setSubsts(data || [])
+  }
+  async function addSubst() {
+    setSubMsg(null)
+    const n = newSub
+    if (!n.system_slug || !n.substituto_id || !n.inicio || !n.fim) {
+      setSubMsg({ type: 'error', text: 'Preencha sistema, quem assume, início e fim.' }); return
+    }
+    const { error } = await supabase.from('alcada_substitutions').insert({
+      titular_id: permUser.id, substituto_id: n.substituto_id, system_slug: n.system_slug, tipo: n.tipo,
+      inicio: n.inicio, fim: n.fim, motivo: n.motivo.trim() || null,
+      titular_mantem: n.titular_mantem, herda_nivel: n.herda_nivel, criado_por: myId,
+    })
+    if (error) { setSubMsg({ type: 'error', text: error.message }); return }
+    logActivity({
+      action: 'add_substitution', target: permUser.name || permUser.email,
+      details: {
+        substituto: users.find(x => x.id === n.substituto_id)?.name || '—',
+        tipo: n.tipo === 'ciencia' ? 'Ciência' : 'Aprovação financeira',
+        periodo: `${n.inicio} → ${n.fim}`, titular_continua: n.titular_mantem, herda_nivel: n.herda_nivel,
+      },
+    })
+    setNewSub(emptySub); setSubMsg({ type: 'success', text: 'Substituição cadastrada.' })
+    loadSubsts(permUser.id)
+  }
+  async function cancelSubst(sub) {
+    const { error } = await supabase.from('alcada_substitutions')
+      .update({ cancelado_em: new Date().toISOString(), cancelado_por: myId }).eq('id', sub.id)
+    if (error) { setSubMsg({ type: 'error', text: error.message }); return }
+    logActivity({ action: 'cancel_substitution', target: permUser.name || permUser.email, details: { tipo: sub.tipo, periodo: `${sub.inicio} → ${sub.fim}` } })
+    loadSubsts(permUser.id)
+  }
 
   /** Pode alterar os PODERES (cargo, liderança, valores, sistemas) de `u`? */
   function canGrantTo(u) {
@@ -411,6 +456,8 @@ export default function Admin({ onBack }) {
     const v = new Map((valex || []).map(r => [`${r.system_slug}|${r.module_key}|${r.tag_key}`, r.allow]))
     setPermGrants(g); setOrigGrants(new Set(g))
     setPermValEx(v); setOrigValEx(new Map(v))
+    setNewSub(emptySub); setSubMsg(null)
+    loadSubsts(u.id)
     setPermMsg(null)
     setPermLoading(true)
 
@@ -1522,6 +1569,101 @@ export default function Admin({ onBack }) {
                     </p>
                   )}
                 </div>
+
+                {/* 🔁 Substituição temporária (férias) — só quem tem poder */}
+                {(myPower === 'plenos' || myPower === 'medios') && substSystems.length > 0 && (
+                  <div>
+                    <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                      <Repeat className="w-3.5 h-3.5 text-brand" />
+                      Substituição temporária (férias)
+                    </label>
+                    <p className="text-slate-500 text-xs mb-3">
+                      Passa a ciência ou o nível de aprovação de {permUser.name?.split(' ')[0] || 'esta pessoa'} para outra pessoa por um período — nada fica parado.
+                      Aprovação financeira: só poderes plenos.
+                    </p>
+
+                    {substs.length > 0 && (
+                      <div className="space-y-1.5 mb-3">
+                        {substs.map(sb => (
+                          <div key={sb.id} className="flex items-center justify-between gap-3 rounded-md border border-surface-border px-3 py-2 text-xs">
+                            <span className="text-slate-300">
+                              <strong className="text-white">{sb.tipo === 'ciencia' ? 'Ciência' : 'Aprovação financeira'}</strong>
+                              {' → '}{users.find(x => x.id === sb.substituto_id)?.name || '—'}
+                              <span className="text-slate-500"> · {sb.inicio.split('-').reverse().join('/')} a {sb.fim.split('-').reverse().join('/')}</span>
+                              {!sb.titular_mantem && <span className="text-amber-400"> · titular fora</span>}
+                              {sb.tipo === 'aprovacao' && !sb.herda_nivel && <span className="text-amber-400"> · sem herdar nível</span>}
+                              {sb.motivo && <span className="text-slate-500 italic"> · {sb.motivo}</span>}
+                            </span>
+                            {(sb.tipo === 'ciencia' || myPower === 'plenos') && (
+                              <button type="button" onClick={() => cancelSubst(sb)} className="text-red-400 hover:underline shrink-0">Cancelar</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="rounded-lg border border-surface-border p-3 space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <select value={newSub.system_slug} onChange={e => setNewSub({ ...newSub, system_slug: e.target.value })}
+                                className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-2 text-xs">
+                          <option value="">Sistema…</option>
+                          {substSystems.map(sl => <option key={sl} value={sl}>{modules.find(m => m.slug === sl)?.name || sl}</option>)}
+                        </select>
+                        <select value={newSub.substituto_id} onChange={e => setNewSub({ ...newSub, substituto_id: e.target.value })}
+                                className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-2 text-xs">
+                          <option value="">Quem assume…</option>
+                          {users.filter(x => x.is_active && x.id !== permUser.id && !x.is_placeholder).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 text-xs">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" name="sub-tipo" className="accent-amber-400" checked={newSub.tipo === 'ciencia'}
+                                 onChange={() => setNewSub({ ...newSub, tipo: 'ciencia' })} />
+                          <span className="text-slate-300">Ciência</span>
+                        </label>
+                        <label className={`flex items-center gap-2 ${myPower === 'plenos' ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                               title={myPower === 'plenos' ? '' : 'Só poderes plenos'}>
+                          <input type="radio" name="sub-tipo" className="accent-amber-400" disabled={myPower !== 'plenos'} checked={newSub.tipo === 'aprovacao'}
+                                 onChange={() => setNewSub({ ...newSub, tipo: 'aprovacao' })} />
+                          <span className="text-slate-300">Aprovação financeira (nível)</span>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <label className="text-[11px] text-slate-500">Início
+                          <input type="date" value={newSub.inicio} onChange={e => setNewSub({ ...newSub, inicio: e.target.value })}
+                                 className="mt-0.5 w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-[11px] text-slate-500">Fim
+                          <input type="date" value={newSub.fim} onChange={e => setNewSub({ ...newSub, fim: e.target.value })}
+                                 className="mt-0.5 w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-[11px] text-slate-500 col-span-2 sm:col-span-1">Motivo
+                          <input value={newSub.motivo} onChange={e => setNewSub({ ...newSub, motivo: e.target.value })} placeholder="Ex.: férias"
+                                 className="mt-0.5 w-full bg-surface border border-surface-border text-white placeholder-slate-600 rounded-lg px-2 py-1.5 text-xs" />
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap gap-4 text-xs">
+                        <label className={`flex items-center gap-2 ${myPower === 'plenos' ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+                          <input type="checkbox" className="accent-amber-400" disabled={myPower !== 'plenos'} checked={newSub.titular_mantem}
+                                 onChange={e => setNewSub({ ...newSub, titular_mantem: e.target.checked })} />
+                          <span className="text-slate-300">Titular continua podendo agir</span>
+                        </label>
+                        {newSub.tipo === 'aprovacao' && (
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="accent-amber-400" checked={newSub.herda_nivel}
+                                   onChange={e => setNewSub({ ...newSub, herda_nivel: e.target.checked })} />
+                            <span className="text-slate-300">Quem assume herda o nível do titular</span>
+                          </label>
+                        )}
+                      </div>
+                      {subMsg && <p className={`text-xs ${subMsg.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>{subMsg.text}</p>}
+                      <button type="button" onClick={addSubst}
+                              className="text-xs font-semibold px-3 py-1.5 rounded-md border border-brand/40 text-brand hover:bg-brand/10">
+                        + Adicionar substituição
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Feedback */}
                 {permMsg && (
