@@ -1,7 +1,7 @@
 # Central de Eventos: Etapa 1, Inventário de gatilhos
 
 Levantamento somente leitura (2026-10-09) de VP Requisições, VP Pós-Venda 360, VP HUB e do próprio portal.
-Itens marcados **(?)** não foram confirmados. Nenhum segredo está reproduzido aqui.
+Itens marcados **(?)** não foram confirmados. Nenhum segredo nem detalhe de vulnerabilidade está reproduzido aqui (o repositório é público).
 
 ## 1. Visão geral
 
@@ -12,7 +12,7 @@ Itens marcados **(?)** não foram confirmados. Nenhum segredo está reproduzido 
 | VP HUB | `010_GestaoImportacao` / `vpprd` | Alerta interno (`alertas`, canal dominante), e-mail SMTP (manual), WhatsApp manual `wa.me`; WhatsApp automático existe mas está órfão | `emails_projeto`, `notificacoes_lidas`, `whatsapp_notification_log` (3 linhas de teste) | só `fluxo_pendentes` (5 tentativas) | boa nos triggers e crons, fraca no front |
 | Portal (vpsistema) | `vpsistema` / `vpsistema` | WhatsApp (2FA, primeiro acesso, broadcast agendado), e-mail de recuperação e convite | tabelas de tentativas e `scheduled_broadcasts` | não **(?)** | tokens de uso único |
 
-Padrões comuns: mesma instância Evolution `pv360` (IP fixo, HTTP) usada por pelo menos 3 sistemas, VP Click como canal interno, e regra "quem é o destinatário" reimplementada em cada sistema.
+Padrões comuns: mesma instância Evolution `pv360` usada por pelo menos 3 sistemas, VP Click como canal interno, e regra "quem é o destinatário" reimplementada em cada sistema.
 
 ## 2. VP Requisições
 
@@ -36,7 +36,7 @@ Achados:
 - Os envios do app saem do front (`notifyWhatsappClient`). Se a aba fechar, perde-se a mensagem. **(?)** Os pontos exatos de chamada não foram lidos.
 - No SLA, "sent" significa só "enfileirado em `net.http_post`".
 - 21% dos avisos de SLA (45 de 215) foram descartados por falta de `whatsapp_number` (8 de 41 perfis sem número).
-- Segurança: a apikey da Evolution está em texto claro dentro de `private.sla_check_and_notify()`, e há JWT embutido nos comandos dos crons de sync.
+- Pontos de segurança desta área foram registrados fora deste repositório público.
 - Links de aprovação por WhatsApp em texto simples. Domínio do SLA difere do domínio do app.
 
 ## 3. VP Pós-Venda 360
@@ -63,10 +63,7 @@ Achados:
 - O VIP não checa "já enviado". Uma reentrega do webhook do Omie repete a mensagem ao cliente.
 - A pesquisa marca `pesquisa_enviada=true` mesmo quando o envio falha.
 - `notify_vpclick_interno` não trata exceção e pode derrubar o INSERT do ticket.
-- Segurança:
-  - `service_role` do Pós-Venda e do VP Click, além das chaves do Omie, estão hardcoded no repo e devem ser tratadas como vazadas.
-  - O segredo de integração está em texto claro no SQL.
-  - Os endpoints `/api/whatsapp/send` e `/start` parecem não validar token e têm CORS `*` **(confirmar com urgência)**.
+- Pontos de segurança desta área foram registrados fora deste repositório público.
   - O webhook do Omie aceita payload sem `appKey`.
 - **(?)** Edge functions `pv360-delivery-event`, `mcp-server` e `omie-sync-nfs`, o arquivo `ai/index.mjs` e o cron externo de handoff não foram lidos.
 
@@ -106,9 +103,8 @@ Achados:
 - Hardcodes:
   - "CEO (Diego)" no texto dos avais.
   - Fallback para o domínio antigo `vpgestaoimportacao.vpsistema.com`.
-  - E-mail pessoal na allowlist do `send-email`.
   - O workflow de deploy no GitHub aponta para o site antigo **(?)**.
-- Segurança: o cliente grava direto em `alertas` com a chave publishable, e a identidade do remetente no `send-email` é declarada pelo navegador. Há `verify_jwt=false` em `capturar-lead-*` e `sso-exchange`, cujo conteúdo não foi auditado.
+- Pontos de segurança desta área foram registrados fora deste repositório público.
 
 ## 5. Portal (vpsistema), levantamento parcial
 
@@ -125,7 +121,7 @@ O WhatsApp passa por `_shared/whatsapp.ts` (Evolution v2, config em secrets). **
    - ação manual do operador.
    O contrato `sistema.entidade.acao` cobre os quatro.
 3. **Destinatário** hoje é: papel em `user_roles`, líder de departamento, `approver_id`, e-mail fixo no código, "global" ou o próprio cliente. A tabela de destinatários da Central precisa aceitar pessoa, papel, departamento, líder do departamento e contato externo.
-4. **Pré-requisitos de segurança** (antes de integrar): rotacionar as credenciais citadas, mover segredos para o Vault, trocar o HTTP do IP da Evolution por TLS e fechar os endpoints de envio sem autenticação.
+4. **Pré-requisito de segurança:** tratar os achados de segurança (registrados fora deste repositório) antes de integrar cada sistema.
 5. **Candidatos à primeira migração**:
    - `whatsapp-notify` do HUB (órfão, sem duplicidade possível);
    - SLA do VP Requisições (já é 100% no banco, com idempotência);
