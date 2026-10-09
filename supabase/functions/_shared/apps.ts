@@ -6,7 +6,7 @@
 // de https://posvenda360.vpsistema.com) — é o que o Dashboard envia como
 // targetApp. O campo `moduleSlug` amarra a entrada ao slug da tabela `modules`,
 // que nem sempre é igual ao hostname (click ≠ vpclick,
-// vpposvenda360 ≠ posvenda360, cotacao-importacao ≠ vpgestaoimportacao).
+// vpposvenda360 ≠ posvenda360, cotacao-importacao ≠ hub).
 export type MagicLinkApp = {
   ssoType: 'magiclink'
   moduleSlug: string
@@ -73,10 +73,15 @@ export const APPS: Record<string, AppConfig> = {
     moduleSlug: 'propostas',
     redirectTo: 'https://propostas.vpsistema.com',
   },
-  vpgestaoimportacao: {
+  // VP Gestão Importação mudou de vpgestaoimportacao.vpsistema.com para
+  // hub.vpsistema.com (09/10/2026) — a chave do mapa precisa bater com o
+  // PRIMEIRO RÓTULO do hostname NOVO, senão o sso-proxy não acha a entrada
+  // (cai no fallback genérico de app desconhecido, que ainda funciona via
+  // `mod.url`, mas perde o registro explícito aqui).
+  hub: {
     ssoType: 'token',
     moduleSlug: 'cotacao-importacao',
-    redirectTo: 'https://vpgestaoimportacao.vpsistema.com',
+    redirectTo: 'https://hub.vpsistema.com',
   },
   // Engenharia e Suporte faltavam no mapa: sem entrada aqui o sso-proxy
   // respondia "Unknown app" (400) e o Dashboard caía no fallback de abrir a

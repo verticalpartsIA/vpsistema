@@ -16,7 +16,7 @@ const CORS = {
 // navegação, não concede nenhuma permissão.
 const KNOWN_APPS = new Set([
   'vprequisicoes', 'posvenda360', 'vpclick', 'visitas',
-  'catraca', 'propostas', 'vpgestaoimportacao',
+  'catraca', 'propostas', 'vpgestaoimportacao', 'hub',
 ])
 
 serve(async (req: Request) => {

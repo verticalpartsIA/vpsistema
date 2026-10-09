@@ -152,7 +152,7 @@ serve(async (req: Request) => {
     const app = appForModuleSlug(moduleSlug)
     if (!app || app.ssoType !== 'magiclink') {
       // Demais apps token-based (catraca, engenharia, suporte,
-      // vpgestaoimportacao) não têm Supabase Auth próprio — nada a provisionar.
+      // hub/cotacao-importacao) não têm Supabase Auth próprio — nada a provisionar.
       return json({ ok: true, skipped: true })
     }
 
