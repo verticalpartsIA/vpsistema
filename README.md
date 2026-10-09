@@ -38,60 +38,55 @@ O **vpsistema.com** resolve isso com:
 
 ## Arquitetura — Árvore de Views
 
+Cada tela tem endereço próprio (desde 09/10/2026). Roteador mínimo em
+`src/lib/router.js` (History API, sem react-router).
+
 ```
-vpsistema.com
+vpsistema.com                        ← Login (raiz do site)
+│   ├── e-mail + senha (+ código por WhatsApp quando o 2FA estiver ativo)
+│   ├── Modo reset                   ← ?type=invite / recovery
+│   └── Modo expired                 ← link expirado
 │
-├── /login                          ← Tela de login (email + senha)
-│   ├── Modo normal                 ← supabase.auth.signInWithPassword()
-│   ├── Modo reset                  ← ?type=invite  (define senha pelo link)
-│   └── Modo expired                ← link de convite expirado
+├── /inicio  (autenticado)           ← Grade de cards
+│   ├── Administração                → só quem tem NÍVEL DE PODER (plenos/médios/baixos)
+│   ├── Painel Executivo             → só cargo Administrador
+│   ├── Histórico                    → só cargo Administrador
+│   └── Cards de sistemas (tabela `modules`)
 │
-├── /dashboard  (autenticado)       ← Tela principal — grade de cards
-│   │
-│   ├── Cards ADMIN (só Administrador)
-│   │   ├── Administração           → view: 'admin'
-│   │   ├── Painel Executivo        → view: 'ceo'
-│   │   └── Logs de Atividade       → view: 'logs'
-│   │
-│   └── Cards de Módulos (dinâmicos — tabela `modules`)
-│       ├── Catraca                 → https://catraca.vpsistema.com
-│       ├── Visitas                 → https://visitas.vpsistema.com
-│       ├── VPRequisições           → https://vprequisicoes.vpsistema.com
-│       ├── Cotação Importação|PRD  → https://vpprd.vpsistema.com        ← SSO
-│       ├── VP Click                → https://vpclick.vpsistema.com      ← SSO
-│       ├── Engenharia              → https://engenharia.vpsistema.com   ← SSO
-│       ├── Suporte                 → https://suporte.vpsistema.com      ← SSO
-│       ├── Propostas               → https://propostas.vpsistema.com    ← SSO
-│       └── Pós-Venda 360          → https://posvenda360.vpsistema.com  ← SSO
-│
-├── /admin  (só Administrador)
-│   ├── Lista de usuários (profiles)
-│   ├── Convidar novo usuário       → Edge Function: invite-user
-│   ├── Ativar / Desativar usuário
-│   └── Modal de permissões por módulo
-│
-├── /ceo  (só Administrador)        ← Painel Executivo / KPIs consolidados
-│
-└── /logs  (só Administrador)       ← Log de atividades (tabela activity_logs)
+├── /administracao                   ← Colaboradores, poderes, valores, sistemas,
+│                                       inativação com motivo, dois celulares
+├── /painel-executivo                ← KPIs consolidados
+└── /historico                       ← Log de atividades (activity_logs)
 ```
+
+- Sem sessão em qualquer endereço → login em `vpsistema.com`; depois do login a
+  pessoa volta para a tela que pediu. F5 exige login de novo (sessão não é
+  guardada no navegador, por segurança).
+- Endereço desconhecido → `/inicio` (ou login).
 
 ---
 
 ## Módulos cadastrados no banco
 
-| sort | Slug                 | Nome                    | URL                                        | Ativo | Cor       |
-|------|----------------------|-------------------------|--------------------------------------------|-------|-----------|
-| 1    | `catraca`            | Catraca                 | https://catraca.vpsistema.com              | ✅    | `#F59E0B` |
-| 2    | `visitas`            | Visitas                 | https://visitas.vpsistema.com              | ✅    | `#10B981` |
-| 3    | `vprequisicoes`      | VPRequisições           | https://vprequisicoes.vpsistema.com/login  | ✅    | `#F59E0B` |
-| 5    | `cotacao-importacao` | Cotação Importação\|PRD | https://vpprd.vpsistema.com                | ✅    | `#0EA5E9` |
-| 6    | `click`              | VP Click                | https://vpclick.vpsistema.com              | ✅    | `#EC4899` |
-| 7    | `engenharia`         | Engenharia              | https://engenharia.vpsistema.com           | ✅    | `#F97316` |
-| 9    | `suporte`            | Suporte                 | https://suporte.vpsistema.com              | ✅    | `#64748B` |
-| 10   | `propostas`          | Propostas               | https://propostas.vpsistema.com/           | ✅    | `#0284C7` |
-| 15   | `vpposvenda360`      | Pós-Venda 360           | https://posvenda360.vpsistema.com/login    | ✅    | `#06B6D4` |
+| Slug                 | Nome            | URL                                         |
+|----------------------|-----------------|---------------------------------------------|
+| `catraca`            | Catraca         | https://catraca.vpsistema.com               |
+| `visitas`            | Visitas         | https://visitas.vpsistema.com               |
+| `vprequisicoes`      | VPRequisições   | https://vprequisicoes.vpsistema.com         |
+| `cotacao-importacao` | **VP HUB**      | https://hub.vpsistema.com (slug antigo mantido) |
+| `click`              | VP Click        | https://vpclick.vpsistema.com               |
+| `engenharia`         | Engenharia      | https://engenharia.vpsistema.com (⚠️ DNS não resolve em 09/10) |
+| `suporte`            | Suporte         | https://suporte.vpsistema.com               |
+| `propostas`          | Propostas       | https://propostas.vpsistema.com             |
+| `vpposvenda360`      | Pós-Venda 360   | https://posvenda360.vpsistema.com           |
+| `gente-gestao`       | Gente & Gestão  | https://gentegestao.vpsistema.com           |
+| `asset-manager`      | Asset Manager   | https://assetmanager.vpsistema.com          |
 
-> Módulos com `is_active = false` não aparecem no dashboard. Para reativar: `UPDATE modules SET is_active = true WHERE slug = '...'`
+> **Sistema novo nasce fechado** (desde 09/10/2026): ao inserir, reativar ou
+> trocar o slug de um módulo, o trigger `trg_close_new_module_for_everyone`
+> grava bloqueio para todos, exceto quem tem poderes **plenos**. Quem tem
+> alçada libera pela `/administracao`. Antes disso, todo sistema novo abria
+> para todo mundo automaticamente.
 
 ---
 
@@ -135,24 +130,50 @@ abria a URL crua, sem sessão — o "dá reload" relatado pelos colaboradores).
 | `module_permissions` | Restrições por usuário (user_id + module_slug)             |
 | `activity_logs`      | Log de ações (login, logout, acesso a módulo, admin)       |
 
-### Lógica de permissões
+### Lógica de permissões — árvore de alçadas
 
 ```
-Todo colaborador cadastrado e ativo acessa TODOS os módulos ativos.
-module_permissions guarda apenas EXCEÇÕES: uma linha com can_access = false
-bloqueia aquele módulo para aquele usuário.
+👤 PESSOA
+├── 🔑 NÍVEL DE PODER (profiles.power_level) — poder DENTRO do vpsistema
+│      plenos : igual ao Gelson/Diego, inclusive dar poderes a si mesmo
+│      medios : dá poderes só a quem está abaixo (baixos/nenhum), nunca a si mesmo
+│      baixos : não dá poderes nem libera valores; ajusta depto/status de quem não tem poder
+│      (vazio): não abre a Administração
+├── ⭐ VALORES R$ (profiles.values_access) — vale no ecossistema inteiro
+│      nenhum (padrão) : R$ desfocado   |   todos : vê todos os valores
+│      (exceções por sistema/valor: próximas etapas — piloto VP HUB)
+└── 🧩 SISTEMAS (module_permissions) — guarda só BLOQUEIOS (can_access = false)
+       (módulos → ações → alcance "meus / meu depto / todos": próximas etapas)
 ```
 
-No modal **Permissões** do Admin, os checkboxes vêm todos marcados — o admin
-desmarca só o que a pessoa **não** deve acessar, e o portal grava um bloqueio.
+**Regras valem no servidor**, não só na tela:
+- `enforce_profile_powers` (profiles) e `enforce_module_permission_powers`
+  (module_permissions), com RLS por `get_my_power()`.
+- Só **plenos** alteram nível de poder. Ninguém além de plenos altera os
+  próprios poderes. Médio nunca mexe em outro médio ou em pleno.
+- `invite-user` e `delete-user` checam o nível de poder.
+- Service role (edge functions/syncs) passa direto.
 
-> Até 29/07/2026 a tabela funcionava como *allow-list*: qualquer linha existente
-> transformava tudo o que não estivesse marcado em acesso negado. Como o modal
-> salva a lista inteira de uma vez, colaboradores acabavam trancados fora de
-> sistemas que ninguém pretendeu bloquear. As 163 linhas de liberação antigas
-> foram removidas (backup em `module_permissions_backup_20260729`) e a regra
-> passou a ser "libera por padrão, bloqueia por exceção" no Dashboard, no
-> `sso-proxy` e no `confirm-permission`.
+**Regra de ouro das atualizações:** publicar o site **nunca** altera usuários,
+poderes ou bloqueios. O deploy (GitHub Actions) só copia o front. Mudança em
+usuários só acontece por migração explícita, revisada e registrada aqui.
+
+> Histórico: até 29/07/2026 `module_permissions` era *allow-list*; passou a
+> "libera por padrão, bloqueia por exceção" (backup em
+> `module_permissions_backup_20260729`). Desde 09/10/2026 sistema novo nasce
+> fechado (ver acima).
+
+### Inativação com motivo
+1ª pergunta: **Demissão** ou **Suspensão de acesso** (afastamento, licença ou
+motivo ainda não definido). Só a Demissão abre o checklist de devolução
+(crachá, celular corporativo, notebook + outro item). Cada inativação é gravada
+em `profile_inactivations`; ao reativar, a tela mostra o mini-relatório.
+
+### Celulares
+`celular_corporativo` e `celular_pessoal`. `celular` é o **número de
+notificação**, calculado no banco (`a_trg_sync_celular_notificacao`):
+corporativo se houver, senão pessoal. Quem já lia `celular` segue a regra sem
+mudança; escrita antiga direto em `celular` continua funcionando.
 
 ---
 
@@ -220,14 +241,14 @@ Se não mapear, o sistema usa uma imagem rotativa pelo índice automaticamente.
 7. Após o primeiro login, o Administrador pode ajustar as permissões por módulo no modal de permissões
 
 ### Departamentos disponíveis
-`Compras` · `Engenharia` · `Financeiro` · `Logistica` · `MKT` · `Vendas`
+`CEO` · `Adm/Financeiro` · `Comercial` · `Engenharia` · `Gente & Gestão` ·
+`Jurídico/Importação/Suprimentos` · `Logística/Almoxarifado/Produção` · `Marketing`
 
-### Níveis de acesso
-| Nível           | Acesso ao painel Admin/CEO/Logs |
-|-----------------|----------------------------------|
-| `Colaborador`   | Não                              |
-| `Lider`         | Não                              |
-| `Administrador` | Sim (cards extras no dashboard)  |
+### Cargo (`level`) × Nível de poder (`power_level`)
+| Campo | Para que serve |
+|-------|----------------|
+| Cargo: `Colaborador` / `Lider` / `Administrador` | Papel nos sistemas satélites e acesso ao Painel Executivo/Histórico |
+| Poder: `plenos` / `medios` / `baixos` | Quem pode administrar pessoas, poderes e valores no vpsistema |
 
 ---
 
@@ -305,6 +326,21 @@ sempre que o colaborador volta para a aba) e:
 VITE_SUPABASE_URL=https://ubdkoqxfwcraftesgmbw.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJ...
 ```
+
+---
+
+## Histórico de mudanças
+
+| Data | PR | O que mudou |
+|------|----|-------------|
+| 09/10/2026 | #50 | Endereço próprio por tela: login em `vpsistema.com`; `/inicio`, `/administracao`, `/painel-executivo`, `/historico` |
+| 09/10/2026 | #51 | Árvore de alçadas — topo: níveis de poder (Plenos/Médios/Baixos) e Valores R$; travas no servidor; `invite-user`/`delete-user` checam o poder. Inauguração: Gelson e Diego plenos; demais Administradores médios; Juliana vê valores |
+| 09/10/2026 | #52 | Inativação com motivo (Demissão / Suspensão de acesso) + mini-relatório; dois celulares (corporativo/pessoal) com número de notificação calculado; acesso às telas de admin não é mais logado em dobro |
+| 09/10/2026 | #54 | Bug "a cada atualização os usuários ganham poderes": sistema novo/reativado/renomeado nasce fechado; README atualizado. Mutirão de segurança acompanhado na issue #53 |
+
+**Lições de deploy (09/10/2026):** edge function publicada pelo conector MCP
+(arquivo único, sem bundler) dá `BOOT_ERROR` com imports `https://esm.sh/...`
+— usar `npm:@supabase/supabase-js@2` e testar a função depois do deploy.
 
 ---
 
