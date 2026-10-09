@@ -33,6 +33,21 @@ const POWER_LEVELS = [
 ]
 const POWER_LABEL = { plenos: 'Plenos', medios: 'Médios', baixos: 'Baixos' }
 
+// Inativação: 1ª pergunta é o motivo. Só "Demissão" abre o checklist de
+// devolução de ativos. "Suspensão de acesso" cobre afastamento, licença ou
+// motivo ainda não definido (decisão do Gelson, 09/10/2026).
+const INACTIVATION_REASONS = [
+  { value: 'demissao',  label: 'Demissão',            hint: 'Desligamento da empresa. Abre o checklist de devolução.' },
+  { value: 'suspensao', label: 'Suspensão de acesso', hint: 'Afastamento, licença ou motivo ainda não definido. Reversível.' },
+]
+const REASON_LABEL = { demissao: 'Demissão', suspensao: 'Suspensão de acesso' }
+const RETURN_ITEMS = ['Crachá', 'Celular corporativo', 'Notebook']
+const RETURN_STATUS = [
+  { value: 'devolvido',   label: 'Devolvido' },
+  { value: 'pendente',    label: 'Pendente' },
+  { value: 'nao_possuia', label: 'Não possuía' },
+]
+
 // Nome de departamento → id utilizável em HTML (o aria-controls do botão de
 // expandir precisa casar com o id do <tbody> do grupo).
 function slugifyDept(dept) {
@@ -93,6 +108,11 @@ export default function Admin({ onBack }) {
 
   // Modal inativação
   const [toggleUser,    setToggleUser]    = useState(null)
+  const [inactReason,   setInactReason]   = useState('')   // 'demissao' | 'suspensao'
+  const [inactReturns,  setInactReturns]  = useState({})   // { [item]: status }
+  const [inactOther,    setInactOther]    = useState('')   // outro item devolvido/pendente
+  const [inactNote,     setInactNote]     = useState('')
+  const [lastInact,     setLastInact]     = useState(null) // mini-relatório da última inativação (reativar)
 
   // Modal exclusão
   const [deleteUser,    setDeleteUser]    = useState(null)
@@ -103,7 +123,8 @@ export default function Admin({ onBack }) {
   const [editNameUser,  setEditNameUser]  = useState(null)   // usuário sendo editado
   const [editNameValue, setEditNameValue] = useState('')
   const [editFuncaoValue, setEditFuncaoValue] = useState('')
-  const [editCelularValue, setEditCelularValue] = useState('')
+  const [editCorpValue,    setEditCorpValue]    = useState('')   // celular corporativo
+  const [editPessValue,    setEditPessValue]    = useState('')   // celular pessoal
   const [editNameSaving, setEditNameSaving] = useState(false)
   const [editNameMsg,   setEditNameMsg]   = useState(null)
 
@@ -177,13 +198,30 @@ export default function Admin({ onBack }) {
   // Inativar tira o acesso da pessoa a todos os sistemas na hora, e o botão
   // fica encostado no "Excluir" — clique errado custa caro. Reativar é inócuo,
   // então só a inativação passa pela confirmação.
-  function requestToggleActive(u) {
-    if (u.is_active) setToggleUser(u)
-    else toggleActive(u)
+  async function requestToggleActive(u) {
+    setInactReason(''); setInactReturns({}); setInactOther(''); setInactNote(''); setLastInact(null)
+    if (!u.is_active) {
+      const { data } = await supabase
+        .from('profile_inactivations')
+        .select('*')
+        .eq('user_id', u.id)
+        .is('reativado_em', null)
+        .order('inativado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      setLastInact(data || null)
+    }
+    setToggleUser(u)
   }
 
   async function toggleActive(u) {
     const newStatus = !u.is_active
+    const devolucoes = inactReason === 'demissao'
+      ? [
+          ...RETURN_ITEMS.map(item => ({ item, status: inactReturns[item] || 'pendente' })),
+          ...(inactOther.trim() ? [{ item: inactOther.trim(), status: inactReturns.__outro || 'pendente' }] : []),
+        ]
+      : []
     setToggleUser(null)
     const { error } = await supabase
       .from('profiles')
@@ -191,13 +229,35 @@ export default function Admin({ onBack }) {
       .eq('id', u.id)
 
     if (error) {
-      setActionMsg({ type: 'error', text: `Erro ao atualizar ${u.name}.` })
+      setActionMsg({ type: 'error', text: error.message || `Erro ao atualizar ${u.name}.` })
     } else {
+      // Mini-relatório: abre na inativação, fecha na reativação
+      if (!newStatus) {
+        await supabase.from('profile_inactivations').insert({
+          user_id: u.id,
+          motivo: inactReason,
+          observacao: inactNote.trim() || null,
+          devolucoes,
+          inativado_por: myId,
+        })
+      } else if (lastInact) {
+        await supabase.from('profile_inactivations')
+          .update({ reativado_em: new Date().toISOString(), reativado_por: myId })
+          .eq('id', lastInact.id)
+      }
       setUsers(prev => prev.map(p => p.id === u.id ? { ...p, is_active: newStatus } : p))
+      const pendentes = devolucoes.filter(d => d.status === 'pendente').map(d => d.item)
       logActivity({
         action: newStatus ? 'reactivate_user' : 'deactivate_user',
         target: u.email || u.name,
-        details: { nome: u.name },
+        details: newStatus
+          ? { nome: u.name, motivo_anterior: REASON_LABEL[lastInact?.motivo] || '—' }
+          : {
+              nome: u.name,
+              motivo: REASON_LABEL[inactReason],
+              ...(inactReason === 'demissao' ? { devolucoes_pendentes: pendentes.length ? pendentes.join(', ') : 'nenhuma' } : {}),
+              ...(inactNote.trim() ? { observacao: inactNote.trim() } : {}),
+            },
       })
       setActionMsg({
         type: 'success',
@@ -211,7 +271,8 @@ export default function Admin({ onBack }) {
     setEditNameUser(u)
     setEditNameValue(u.name || '')
     setEditFuncaoValue(u.job_title || '')
-    setEditCelularValue(u.celular || '')
+    setEditCorpValue(u.celular_corporativo || '')
+    setEditPessValue(u.celular_pessoal || '')
     setEditNameMsg(null)
   }
 
@@ -222,12 +283,14 @@ export default function Admin({ onBack }) {
       return
     }
     const newFuncao  = editFuncaoValue.trim() || null
-    const newCelular = editCelularValue.replace(/\D/g, '') || null
+    const newCorp    = editCorpValue.replace(/\D/g, '') || null
+    const newPess    = editPessValue.replace(/\D/g, '') || null
 
     const oldName    = editNameUser.name
     const oldFuncao  = editNameUser.job_title || null
-    const oldCelular = editNameUser.celular || null
-    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCelular === oldCelular
+    const oldCorp    = editNameUser.celular_corporativo || null
+    const oldPess    = editNameUser.celular_pessoal || null
+    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCorp === oldCorp && newPess === oldPess
     if (nothingChanged) {
       setEditNameUser(null)
       return
@@ -238,7 +301,9 @@ export default function Admin({ onBack }) {
 
     const { error } = await supabase
       .from('profiles')
-      .update({ name: newName, job_title: newFuncao, celular: newCelular })
+      // `celular` (número de notificação) é recalculado pelo banco:
+      // corporativo se houver, senão pessoal.
+      .update({ name: newName, job_title: newFuncao, celular_corporativo: newCorp, celular_pessoal: newPess })
       .eq('id', editNameUser.id)
 
     if (error) {
@@ -248,7 +313,7 @@ export default function Admin({ onBack }) {
     }
 
     setUsers(prev => prev.map(p => p.id === editNameUser.id
-      ? { ...p, name: newName, job_title: newFuncao, celular: newCelular }
+      ? { ...p, name: newName, job_title: newFuncao, celular_corporativo: newCorp, celular_pessoal: newPess, celular: newCorp || newPess }
       : p))
     // ActivityLog renderiza cada valor de `details` como string (`${k}: ${v}`)
     // — objetos aninhados tipo { de, para } viram "[object Object]" na tela,
@@ -256,7 +321,8 @@ export default function Admin({ onBack }) {
     const changes = {}
     if (newName !== oldName) changes.nome = `${oldName || '—'} → ${newName}`
     if (newFuncao !== oldFuncao) changes.funcao = `${oldFuncao || '—'} → ${newFuncao || '—'}`
-    if (newCelular !== oldCelular) changes.celular = `${oldCelular || '—'} → ${newCelular || '—'}`
+    if (newCorp !== oldCorp) changes.celular_corporativo = `${oldCorp || '—'} → ${newCorp || '—'}`
+    if (newPess !== oldPess) changes.celular_pessoal = `${oldPess || '—'} → ${newPess || '—'}`
     logActivity({
       action: 'edit_profile',
       target: editNameUser.email,
@@ -924,7 +990,10 @@ export default function Admin({ onBack }) {
                       </td>
                       <td className="px-4 py-4 hidden md:table-cell">
                         {u.celular
-                          ? <span className="text-slate-300 text-xs whitespace-nowrap">{formatCelular(u.celular)}</span>
+                          ? <span className="text-slate-300 text-xs whitespace-nowrap">
+                              {formatCelular(u.celular)}
+                              <span className="ml-1 text-slate-500">({u.celular_corporativo ? 'corp.' : 'pessoal'})</span>
+                            </span>
                           : <span className="text-slate-600 text-xs italic">—</span>}
                       </td>
                       <td className="px-4 py-4">
@@ -1345,16 +1414,32 @@ export default function Admin({ onBack }) {
                 />
               </div>
 
-              <div>
-                <label className="text-xs text-slate-500 uppercase tracking-wider">Celular</label>
-                <input
-                  type="tel"
-                  value={editCelularValue}
-                  onChange={e => setEditCelularValue(e.target.value)}
-                  placeholder="Ex: 11999999999"
-                  className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
-                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500 uppercase tracking-wider">Celular corporativo</label>
+                  <input
+                    type="tel"
+                    value={editCorpValue}
+                    onChange={e => setEditCorpValue(e.target.value)}
+                    placeholder="Ex: 11999999999"
+                    className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                               rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 uppercase tracking-wider">Celular pessoal</label>
+                  <input
+                    type="tel"
+                    value={editPessValue}
+                    onChange={e => setEditPessValue(e.target.value)}
+                    placeholder="Ex: 11999999999"
+                    className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                               rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                  />
+                </div>
+                <p className="sm:col-span-2 text-slate-500 text-xs -mt-1">
+                  Mensagens vão para o <strong className="text-slate-400">corporativo</strong>; o pessoal só recebe se não houver corporativo.
+                </p>
               </div>
 
               {editNameMsg && (
@@ -1392,41 +1477,144 @@ export default function Admin({ onBack }) {
         </div>
       )}
 
-      {/* ── Modal: Confirmar Inativação ── */}
+      {/* ── Modal: Inativar (motivo + devoluções) / Reativar (mini-relatório) ── */}
       {toggleUser && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-          <div className="bg-surface-card border border-yellow-600/40 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
-            <div className="flex flex-col items-center text-center gap-4">
-              <div className="w-14 h-14 rounded-full bg-yellow-500/15 flex items-center justify-center">
-                <AlertCircle className="w-7 h-7 text-yellow-500" />
-              </div>
-              <div>
-                <h2 className="text-white font-bold text-lg">Inativar colaborador?</h2>
-                <p className="text-slate-400 text-sm mt-1">
-                  <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> perde
-                  o acesso ao portal e a <span className="text-yellow-400 font-semibold">todos os sistemas VP</span> imediatamente.
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
+          <div className="bg-surface-card border border-yellow-600/40 rounded-2xl p-8 w-full max-w-md shadow-2xl max-h-full overflow-y-auto">
+            {toggleUser.is_active ? (
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col items-center text-center gap-3">
+                  <div className="w-14 h-14 rounded-full bg-yellow-500/15 flex items-center justify-center">
+                    <AlertCircle className="w-7 h-7 text-yellow-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-white font-bold text-lg">Inativar colaborador?</h2>
+                    <p className="text-slate-400 text-sm mt-1">
+                      <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> perde
+                      o acesso ao portal e a <span className="text-yellow-400 font-semibold">todos os sistemas VP</span> imediatamente.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 1ª pergunta: motivo */}
+                <div>
+                  <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Motivo</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {INACTIVATION_REASONS.map(opt => (
+                      <label key={opt.value}
+                             className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+                               ${inactReason === opt.value ? 'border-yellow-500/60 bg-yellow-500/10' : 'border-surface-border'}`}>
+                        <input type="radio" name="inact-reason" className="mt-1 accent-amber-400"
+                               checked={inactReason === opt.value} onChange={() => setInactReason(opt.value)} />
+                        <span>
+                          <span className="block text-white text-sm font-medium">{opt.label}</span>
+                          <span className="block text-slate-500 text-xs">{opt.hint}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Só na demissão: devolução de ativos */}
+                {inactReason === 'demissao' && (
+                  <div>
+                    <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Devolução de ativos</label>
+                    <div className="space-y-2">
+                      {RETURN_ITEMS.map(item => (
+                        <div key={item} className="flex items-center justify-between gap-3">
+                          <span className="text-slate-300 text-sm">{item}</span>
+                          <select value={inactReturns[item] || 'pendente'}
+                                  onChange={e => setInactReturns(prev => ({ ...prev, [item]: e.target.value }))}
+                                  className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-brand">
+                            {RETURN_STATUS.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-3">
+                        <input value={inactOther} onChange={e => setInactOther(e.target.value)}
+                               placeholder="Outro item (ex.: chave, uniforme)"
+                               className="flex-1 bg-surface border border-surface-border text-white placeholder-slate-600 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-brand" />
+                        <select value={inactReturns.__outro || 'pendente'} disabled={!inactOther.trim()}
+                                onChange={e => setInactReturns(prev => ({ ...prev, __outro: e.target.value }))}
+                                className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-brand disabled:opacity-50">
+                          {RETURN_STATUS.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {inactReason && (
+                  <div>
+                    <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Observação (opcional)</label>
+                    <textarea value={inactNote} onChange={e => setInactNote(e.target.value)} rows={2}
+                              className="w-full bg-surface border border-surface-border text-white placeholder-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand"
+                              placeholder="Ex.: retorno previsto em 30 dias" />
+                  </div>
+                )}
+
+                <p className="text-slate-500 text-xs text-center">
+                  O cadastro não é apagado. Dá para reativar a qualquer momento por este mesmo botão.
                 </p>
-                <p className="text-slate-500 text-xs mt-2">
-                  O cadastro não é apagado — dá para reativar a qualquer momento por este mesmo botão.
-                </p>
+                <div className="flex gap-3 w-full">
+                  <button onClick={() => setToggleUser(null)}
+                          className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border text-slate-400 hover:text-white hover:border-slate-500 transition-colors">
+                    Cancelar
+                  </button>
+                  <button onClick={() => toggleActive(toggleUser)} disabled={!inactReason}
+                          className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    Inativar
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-3 w-full mt-2">
-                <button
-                  onClick={() => setToggleUser(null)}
-                  className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border
-                             text-slate-400 hover:text-white hover:border-slate-500 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => toggleActive(toggleUser)}
-                  className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg
-                             bg-yellow-600 hover:bg-yellow-700 text-white transition-colors"
-                >
-                  Inativar
-                </button>
+            ) : (
+              <div className="flex flex-col gap-5">
+                <div className="text-center">
+                  <h2 className="text-white font-bold text-lg">Reativar colaborador?</h2>
+                  <p className="text-slate-400 text-sm mt-1">
+                    <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> volta a ter acesso ao portal.
+                  </p>
+                </div>
+
+                {/* Mini-relatório da inativação */}
+                {lastInact ? (
+                  <div className="rounded-lg border border-surface-border p-4 text-sm space-y-2">
+                    <p className="text-slate-300 text-xs font-semibold uppercase tracking-wider">Última inativação</p>
+                    <p className="text-slate-400">
+                      <span className="text-white font-medium">{REASON_LABEL[lastInact.motivo]}</span>
+                      {' · '}{new Date(lastInact.inativado_em).toLocaleDateString('pt-BR')}
+                      {lastInact.inativado_por && <> · por {users.find(x => x.id === lastInact.inativado_por)?.name || '—'}</>}
+                    </p>
+                    {(lastInact.devolucoes || []).length > 0 && (
+                      <ul className="space-y-1">
+                        {lastInact.devolucoes.map(d => (
+                          <li key={d.item} className="flex justify-between text-xs">
+                            <span className="text-slate-400">{d.item}</span>
+                            <span className={d.status === 'pendente' ? 'text-red-400 font-medium' : 'text-slate-500'}>
+                              {RETURN_STATUS.find(st => st.value === d.status)?.label || d.status}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {lastInact.observacao && <p className="text-slate-500 text-xs italic">{lastInact.observacao}</p>}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-xs text-center">Sem registro de motivo (inativado antes deste recurso).</p>
+                )}
+
+                <div className="flex gap-3 w-full">
+                  <button onClick={() => setToggleUser(null)}
+                          className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border text-slate-400 hover:text-white hover:border-slate-500 transition-colors">
+                    Cancelar
+                  </button>
+                  <button onClick={() => toggleActive(toggleUser)}
+                          className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors">
+                    Reativar
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}

@@ -156,7 +156,12 @@ function App() {
 
   // Auditoria: registra a entrada nas telas de administrador, inclusive
   // quando a pessoa abre o endereço direto (favorito, link colado).
+  // Lembra a última tela registrada: o perfil recarrega durante o login
+  // (target passa por null e volta), e sem isso a entrada era logada 2x.
+  const lastAuditRef = useRef(null)
   useEffect(() => {
+    if (!target || target === lastAuditRef.current) return
+    lastAuditRef.current = target
     if (target === ROUTES.admin) logActivity({ action: 'admin_access' })
     if (target === ROUTES.ceo)   logActivity({ action: 'ceo_access' })
     if (target === ROUTES.logs)  logActivity({ action: 'log_access' })
