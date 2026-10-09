@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2'
 import nodemailer from 'npm:nodemailer'
 import { PLATFORMS } from '../_shared/platforms.ts'
 import { withRetry } from '../_shared/retry.ts'
@@ -35,20 +35,28 @@ Deno.serve(async (req) => {
       })
     }
 
-    // ── Confirma que o chamador é Administrador ──
+    // ── Confirma que o chamador tem nível de poder no vpsistema ──
+    // (plenos/medios/baixos — ver migration 20261009120000_poderes_e_valores)
     const { data: profile } = await supabaseUser
       .from('profiles')
-      .select('level')
+      .select('power_level')
       .eq('id', user.id)
       .single()
 
-    if (profile?.level !== 'Administrador') {
-      return new Response(JSON.stringify({ error: 'Apenas administradores podem convidar.' }), {
+    if (!profile?.power_level) {
+      return new Response(JSON.stringify({ error: 'Você não tem alçada para cadastrar colaboradores.' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
     const { email, name, level, department, is_department_lead, password, avatar_url, resend } = await req.json()
+
+    // Poder baixo não dá poderes: não cadastra ninguém como Administrador nem líder.
+    if (profile.power_level === 'baixos' && (level === 'Administrador' || is_department_lead)) {
+      return new Response(JSON.stringify({ error: 'Você não tem alçada para cadastrar alguém como Administrador ou líder.' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
 
     if (!password || password.length < 6) {
       return new Response(JSON.stringify({ error: 'A senha temporária deve ter pelo menos 6 caracteres.' }), {
