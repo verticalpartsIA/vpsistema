@@ -96,7 +96,7 @@ Garantias: gravação síncrona do evento e resposta em poucos ms. Nada de envio
 2. **Worker de envio** (edge function, a cada minuto): pega lote com `SKIP LOCKED`, respeita `janela_envio`, o limite do canal e o intervalo mínimo entre mensagens (hoje o portal usa 2 a 3 s no broadcast). Registra a `tentativa`. Erro transitório reagenda com backoff (1, 5, 15, 60 minutos, no máximo 5). Erro permanente (número inválido) vai direto para `falha`.
 3. **Reenvio manual** pela tela de Falhas cria nova tentativa sobre o mesmo `envio`, sem duplicar a mensagem lógica.
 4. **Canal WhatsApp:** a Evolution API, com a URL e a chave vindas do Vault. Um único adaptador substitui os envios espalhados nos sistemas.
-5. **Canal interno:** grava no `alertas` do sistema de destino ou numa tabela `eventos.notificacoes` lida pelo portal. A escolha depende da decisão 3 da seção 6.
+5. **Canal interno:** entregue pelo adaptador do sistema de destino (seção 6.1), registrado como `interno:<sistema>`.
 
 ## 5. Mapeamento inicial (primeiros gatilhos, todos em `sombra` primeiro)
 
@@ -109,13 +109,27 @@ Garantias: gravação síncrona do evento e resposta em poucos ms. Nada de envio
 
 O restante entra depois, um sistema por vez, seguindo o inventário.
 
-## 6. Decisões em aberto (preciso da sua resposta)
+## 6. Decisões tomadas
 
-1. **Hospedagem:** o schema `eventos` no projeto Supabase do portal está bom, ou prefere um projeto dedicado (isola melhor a falha, custa mais um projeto)?
-2. **Quem é "pessoa":** o cadastro de destinatários deve ser `profiles` do portal (já tem celular e papel) mais contatos externos, ou cada sistema mantém o seu?
-3. **Notificação interna:** a Central entrega no portal (uma caixa de entrada única) ou continua gravando no `alertas` de cada sistema?
-4. **Prazo do modo `sombra`:** quantos dias de comparação antes de desligar o mecanismo antigo (sugestão: 7 dias úteis sem divergência)?
-5. **Canal e-mail:** entra na primeira fase ou fica para depois (hoje só existe envio manual no HUB e o e-mail do Supabase Auth)?
+| # | Tema | Decisão |
+|---|---|---|
+| 1 | Hospedagem | Schema `eventos` no projeto Supabase do portal (`vpsistema`). |
+| 2 | Destinatários | Baseados em `profiles` do portal, mais contatos externos. `destinatarios.perfil_id` aponta para `profiles`. |
+| 3 | Notificação interna | Cada sistema mantém a sua caixa (alertas/VP Click), **entregue pela Central por um adaptador por sistema** (ver 6.1). |
+| 4 | Período em `sombra` | 7 dias úteis sem divergência antes de desligar o mecanismo antigo. |
+| 5 | E-mail | Fora da primeira fase. A tabela `canais` já prevê `email`, desativado. |
+
+### 6.1 Notificação interna: como fazer bem
+
+Manter a caixa de cada sistema é uma boa prática, desde que a Central **não grave direto nas tabelas dos outros sistemas**. Isso exigiria credencial de cada banco dentro da Central e criaria acoplamento por esquema.
+
+O desenho recomendado é um **adaptador de entrega por sistema**:
+- Cada sistema expõe um ponto de entrada mínimo e autenticado, por exemplo a RPC ou edge function `receber_notificacao_central`.
+- Esse ponto grava na caixa local (`alertas` no HUB, notificações no VP Click, etc.), já com o destinatário individual, e devolve o id local.
+- A Central registra esse envio como qualquer outro canal: canal `interno:<sistema>`, com tentativa, resultado e retry.
+- Cada sistema decide como exibir. A Central decide quem recebe e garante registro, deduplicação e auditoria.
+
+Vantagens: a experiência de cada sistema não muda, o log fica num lugar só, e o fim dos alertas "globais" vira uma regra de destinatário na Central. Mais tarde, um canal `interno:portal` pode oferecer uma caixa única sem refazer nada.
 
 ## 7. Fora do escopo desta etapa
 
