@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 
-// Cada tela do portal tem o seu endereço (vpsistema.com/dashboard, /admin…).
+// Cada tela do portal tem o seu endereço: o login é a raiz (vpsistema.com) e,
+// já dentro, cada tela tem nome próprio (vpsistema.com/inicio, /historico…).
 // Roteador mínimo sobre a History API — o site é uma SPA só, sem precisar de
 // react-router. O .htaccess (e o `serve -s`) já devolvem o index.html para
-// qualquer caminho, então recarregar em /logs funciona.
+// qualquer caminho, então recarregar em /historico funciona.
 
 export const ROUTES = {
-  login:     '/login',
-  dashboard: '/dashboard',
-  admin:     '/admin',
-  ceo:       '/ceo',
-  logs:      '/logs',
+  login:     '/',
+  dashboard: '/inicio',
+  admin:     '/administracao',
+  ceo:       '/painel-executivo',
+  logs:      '/historico',
 }
 
 // Telas que só o Administrador abre
@@ -19,7 +20,7 @@ export const ADMIN_PATHS = [ROUTES.admin, ROUTES.ceo, ROUTES.logs]
 const KNOWN = Object.values(ROUTES)
 
 function currentPath() {
-  const p = window.location.pathname.replace(/\/+$/, '').toLowerCase()
+  const p = window.location.pathname.replace(/\/+$/, '').toLowerCase() || '/'
   return KNOWN.includes(p) ? p : '/'
 }
 
