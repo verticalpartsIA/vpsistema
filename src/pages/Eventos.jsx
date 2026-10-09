@@ -202,7 +202,7 @@ function Catalogo({ sistemaInicial }) {
 
   async function mudarModo(l, modo) {
     const { error } = await eventos().from('catalogo_gatilhos')
-      .update({ modo: modo === 'desligado' ? 'desligado' : modo, ativo: modo !== 'desligado' }).eq('id', l.id)
+      .update({ modo, ativo: modo !== 'desligado' }).eq('id', l.id)
     if (error) window.alert('Não foi possível alterar o gatilho: ' + error.message)
     else setVersao(v => v + 1)
   }
@@ -220,6 +220,7 @@ function Catalogo({ sistemaInicial }) {
         ? (
           <select value={l.modo} onChange={e => mudarModo(l, e.target.value)}
             className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1 text-xs">
+            <option value="legado">Só no legado</option>
             <option value="sombra">Sombra</option>
             <option value="ativo">Ativo</option>
             <option value="desligado">Desligado</option>
