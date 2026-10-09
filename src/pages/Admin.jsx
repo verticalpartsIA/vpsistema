@@ -99,6 +99,14 @@ export default function Admin({ onBack }) {
   const [permDept,      setPermDept]      = useState('')     // departamento em edição
   const [permIsLead,    setPermIsLead]    = useState(false)  // líder de departamento em edição
   const [permPower,     setPermPower]     = useState('')     // nível de poder em edição ('' = nenhum)
+  // Árvore de alçadas por sistema (catálogo + o que a pessoa pode em cada módulo)
+  const [catalog,       setCatalog]       = useState({ modules: [], actions: [], tags: [] })
+  const [permGrants,    setPermGrants]    = useState(new Set())  // "sistema|módulo|ação"
+  const [permValEx,     setPermValEx]     = useState(new Map())  // "sistema|módulo|etiqueta" → allow
+  const [origGrants,    setOrigGrants]    = useState(new Set())
+  const [origValEx,     setOrigValEx]     = useState(new Map())
+  const [openSystems,   setOpenSystems]   = useState(new Set())  // sistemas com a árvore aberta
+  const [openModules,   setOpenModules]   = useState(new Set())  // "sistema|módulo" abertos
   const [permValues,    setPermValues]    = useState('nenhum') // valores R$: 'nenhum' | 'todos'
   const [permSlugs,     setPermSlugs]     = useState([])     // slugs marcados ([] = acesso pleno)
   const [permFull,      setPermFull]      = useState(true)   // toggle "acesso total"
@@ -143,6 +151,52 @@ export default function Admin({ onBack }) {
   const [myId, setMyId] = useState(null)
   const myPower = users.find(u => u.id === myId)?.power_level || null
 
+  // ── Árvore de alçadas (catálogo por sistema) ─────────────────────────────
+  const catalogSystems = new Set(catalog.modules.map(m => m.system_slug))
+  function treeFor(slug) {
+    const groups = []
+    for (const m of catalog.modules.filter(x => x.system_slug === slug)) {
+      let g = groups.find(x => x.label === m.group_label)
+      if (!g) { g = { label: m.group_label, modules: [] }; groups.push(g) }
+      g.modules.push({
+        ...m,
+        actions: catalog.actions.filter(a => a.system_slug === slug && a.module_key === m.module_key),
+        tags:    catalog.tags.filter(t => t.system_slug === slug && t.module_key === m.module_key),
+      })
+    }
+    return groups
+  }
+  const gkey = (sys, mod, act) => `${sys}|${mod}|${act}`
+  function grantCount(slug, mod) {
+    const prefix = mod ? `${slug}|${mod}|` : `${slug}|`
+    let n = 0; permGrants.forEach(k => { if (k.startsWith(prefix)) n++ }); return n
+  }
+  function toggleGrant(sys, mod, act, choiceGroup, actionsOfModule) {
+    setPermGrants(prev => {
+      const next = new Set(prev)
+      const k = gkey(sys, mod, act)
+      if (next.has(k)) { next.delete(k); return next }
+      if (choiceGroup) actionsOfModule.filter(a => a.choice_group === choiceGroup).forEach(a => next.delete(gkey(sys, mod, a.action_key)))
+      next.add(k); return next
+    })
+  }
+  function setGroupAll(sys, group, on) {
+    setPermGrants(prev => {
+      const next = new Set(prev)
+      group.modules.forEach(m => m.actions.forEach(a => {
+        const k = gkey(sys, m.module_key, a.action_key)
+        if (on && !a.choice_group) next.add(k); if (!on) next.delete(k)
+      }))
+      return next
+    })
+  }
+  function toggleValueEx(sys, mod, tag) {
+    const k = gkey(sys, mod, tag)
+    const allow = permValues !== 'todos'      // 🔒 → exceção libera · 🔓 → exceção esconde
+    setPermValEx(prev => { const next = new Map(prev); if (next.has(k)) next.delete(k); else next.set(k, allow); return next })
+  }
+  function toggleOpen(setter, key) { setter(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n }) }
+
   /** Pode alterar os PODERES (cargo, liderança, valores, sistemas) de `u`? */
   function canGrantTo(u) {
     if (!u) return false
@@ -174,6 +228,11 @@ export default function Admin({ onBack }) {
       supabase.from('modules').select('*').eq('is_active', true).order('sort_order'),
       supabase.from('module_permissions').select('user_id, module_slug, can_access'),
     ])
+    Promise.all([
+      supabase.from('catalog_modules').select('*').order('sort_order'),
+      supabase.from('catalog_actions').select('*').order('sort_order'),
+      supabase.from('catalog_value_tags').select('*').order('sort_order'),
+    ]).then(([cm, ca, ct]) => setCatalog({ modules: cm.data || [], actions: ca.data || [], tags: ct.data || [] }))
     setUsers(u || [])
     setModules(m || [])
 
@@ -343,6 +402,15 @@ export default function Admin({ onBack }) {
     setPermIsLead(Boolean(u.is_department_lead))
     setPermPower(u.power_level || '')
     setPermValues(u.values_access || 'nenhum')
+    setOpenSystems(new Set()); setOpenModules(new Set())
+    const [{ data: grants }, { data: valex }] = await Promise.all([
+      supabase.from('user_grants').select('system_slug, module_key, action_key').eq('user_id', u.id),
+      supabase.from('user_value_exceptions').select('system_slug, module_key, tag_key, allow').eq('user_id', u.id),
+    ])
+    const g = new Set((grants || []).map(r => `${r.system_slug}|${r.module_key}|${r.action_key}`))
+    const v = new Map((valex || []).map(r => [`${r.system_slug}|${r.module_key}|${r.tag_key}`, r.allow]))
+    setPermGrants(g); setOrigGrants(new Set(g))
+    setPermValEx(v); setOrigValEx(new Map(v))
     setPermMsg(null)
     setPermLoading(true)
 
@@ -444,6 +512,40 @@ export default function Admin({ onBack }) {
       }
     }
 
+    // 3. Árvore de alçadas: grava só o que mudou (o banco confere a alçada de novo)
+    if (canGrant) {
+      const split = k => { const [system_slug, module_key, key] = k.split('|'); return { system_slug, module_key, key } }
+      const added   = [...permGrants].filter(k => !origGrants.has(k))
+      const removed = [...origGrants].filter(k => !permGrants.has(k))
+      if (removed.length) {
+        const byMod = {}
+        removed.forEach(k => { const r = split(k); (byMod[`${r.system_slug}|${r.module_key}`] ||= []).push(r.key) })
+        for (const [sm, keys] of Object.entries(byMod)) {
+          const [system_slug, module_key] = sm.split('|')
+          const { error } = await supabase.from('user_grants').delete()
+            .eq('user_id', permUser.id).eq('system_slug', system_slug).eq('module_key', module_key).in('action_key', keys)
+          if (error) { setPermMsg({ type: 'error', text: error.message }); setPermSaving(false); return }
+        }
+      }
+      if (added.length) {
+        const rows = added.map(k => { const r = split(k); return { user_id: permUser.id, system_slug: r.system_slug, module_key: r.module_key, action_key: r.key, granted_by: myId } })
+        const { error } = await supabase.from('user_grants').insert(rows)
+        if (error) { setPermMsg({ type: 'error', text: error.message }); setPermSaving(false); return }
+      }
+      const vRemoved = [...origValEx.keys()].filter(k => !permValEx.has(k))
+      for (const k of vRemoved) {
+        const r = split(k)
+        await supabase.from('user_value_exceptions').delete()
+          .eq('user_id', permUser.id).eq('system_slug', r.system_slug).eq('module_key', r.module_key).eq('tag_key', r.key)
+      }
+      const vChanged = [...permValEx.entries()].filter(([k, allow]) => origValEx.get(k) !== allow)
+      if (vChanged.length) {
+        const rows = vChanged.map(([k, allow]) => { const r = split(k); return { user_id: permUser.id, system_slug: r.system_slug, module_key: r.module_key, tag_key: r.key, allow, granted_by: myId } })
+        const { error } = await supabase.from('user_value_exceptions').upsert(rows)
+        if (error) { setPermMsg({ type: 'error', text: error.message }); setPermSaving(false); return }
+      }
+    }
+
     // Atualiza lista local de usuários com nível, departamento e liderança
     setUsers(prev => prev.map(p =>
       p.id === permUser.id ? { ...p, ...changes } : p
@@ -465,6 +567,7 @@ export default function Admin({ onBack }) {
         departamento: permDept || '(nenhum)',
         lider_departamento: permIsLead,
         poder: POWER_LABEL[permPower] || 'nenhum',
+        alcadas: `${permGrants.size} (+${[...permGrants].filter(k => !origGrants.has(k)).length} / -${[...origGrants].filter(k => !permGrants.has(k)).length})`,
         valores: permValues === 'todos' ? 'vê todos' : 'não vê',
         acesso: !canGrant ? '(sem alteração)'
           : blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
@@ -1097,7 +1200,7 @@ export default function Admin({ onBack }) {
       {/* ── Modal: Permissões ── */}
       {permUser && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
-          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-lg shadow-2xl max-h-full overflow-y-auto">
+          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-3xl shadow-2xl max-h-full overflow-y-auto">
 
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -1189,7 +1292,7 @@ export default function Admin({ onBack }) {
                               name="perm-values"
                               checked={selected}
                               disabled={!enabled}
-                              onChange={() => setPermValues(opt.value)}
+                              onChange={() => { if (opt.value !== permValues) setPermValEx(new Map()); setPermValues(opt.value) }}
                               className="accent-amber-400"
                             />
                             <opt.Icon className={`w-3.5 h-3.5 ${selected ? 'text-brand' : 'text-slate-500'}`} />
@@ -1201,7 +1304,7 @@ export default function Admin({ onBack }) {
                     })}
                   </div>
                   <p className="text-slate-500 text-xs mt-2">
-                    Exceções por sistema (ex.: só "valores da P.I.") chegam nas próximas etapas.
+                    Exceções por valor (ex.: só "valores da P.I.") ficam dentro de cada sistema, em ▸ Alçadas.
                   </p>
                 </div>
 
@@ -1260,8 +1363,8 @@ export default function Admin({ onBack }) {
                     Sistemas
                   </label>
                   <p className="text-slate-500 text-xs mb-3 leading-relaxed">
-                    Todo colaborador cadastrado entra em todos os sistemas por padrão.
-                    Desmarque apenas o que este colaborador <strong className="text-slate-400">não</strong> deve acessar.
+                    Desmarque o que este colaborador <strong className="text-slate-400">não</strong> deve acessar.
+                    Em ▸ Alçadas você define o que ele pode fazer dentro de cada sistema. Sistemas novos chegam fechados.
                   </p>
 
                   {/* Toggle acesso total */}
@@ -1279,56 +1382,139 @@ export default function Admin({ onBack }) {
                     </div>
                   </label>
 
-                  {/* Lista de módulos individuais */}
-                  {!permFull && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {modules.map(mod => {
-                        const checked  = permSlugs.includes(mod.slug)
-                        const modColor = mod.color || '#F59E0B'
-                        const ModIcon  = getModuleIcon(mod.icon)
-                        return (
-                          <label
-                            key={mod.slug}
-                            className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-150"
-                            style={checked ? {
-                              borderColor: `${modColor}60`,
-                              background:  `${modColor}12`,
-                            } : {
-                              borderColor: 'rgba(255,255,255,0.07)',
-                            }}
-                          >
+                  {/* Sistemas — cada um com a sua árvore de alçadas (clique em ▸ Alçadas) */}
+                  <div className="space-y-2">
+                    {modules.map(mod => {
+                      const checked  = permFull || permSlugs.includes(mod.slug)
+                      const modColor = mod.color || '#F59E0B'
+                      const ModIcon  = getModuleIcon(mod.icon)
+                      const hasTree  = catalogSystems.has(mod.slug)
+                      const isOpen   = openSystems.has(mod.slug)
+                      const editable = canGrantTo(permUser)
+                      return (
+                        <div key={mod.slug} className="rounded-lg border transition-all"
+                             style={checked ? { borderColor: `${modColor}60`, background: `${modColor}0d` } : { borderColor: 'rgba(255,255,255,0.07)' }}>
+                          <div className="flex items-center gap-3 p-3">
                             <input
                               type="checkbox"
                               checked={checked}
-                              disabled={!canGrantTo(permUser)}
-                              onChange={() => toggleSlug(mod.slug)}
+                              disabled={!editable}
+                              onChange={() => {
+                                if (permFull) { setPermFull(false); setPermSlugs(modules.map(m => m.slug).filter(s => s !== mod.slug)) }
+                                else toggleSlug(mod.slug)
+                              }}
                               className="w-4 h-4 cursor-pointer shrink-0"
                               style={{ accentColor: modColor }}
                             />
-                            {/* Ícone do módulo */}
-                            <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all"
-                              style={{
-                                background: checked ? `${modColor}25` : 'rgba(255,255,255,0.05)',
-                              }}
-                            >
-                              <ModIcon
-                                className="w-4 h-4"
-                                strokeWidth={1.75}
-                                style={{ color: checked ? modColor : '#64748b' }}
-                              />
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                                 style={{ background: checked ? `${modColor}25` : 'rgba(255,255,255,0.05)' }}>
+                              <ModIcon className="w-4 h-4" strokeWidth={1.75} style={{ color: checked ? modColor : '#64748b' }} />
                             </div>
-                            <span
-                              className="text-sm font-medium transition-colors"
-                              style={{ color: checked ? '#e2e8f0' : '#64748b' }}
-                            >
-                              {mod.name}
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
-                  )}
+                            <span className="text-sm font-medium flex-1" style={{ color: checked ? '#e2e8f0' : '#64748b' }}>{mod.name}</span>
+                            {hasTree && checked && (
+                              <button type="button" onClick={() => toggleOpen(setOpenSystems, mod.slug)}
+                                      className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border border-surface-border text-slate-300 hover:text-white hover:border-slate-500">
+                                {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                Alçadas
+                                <span className="ml-1 text-slate-500">({grantCount(mod.slug)})</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {hasTree && checked && isOpen && (
+                            <div className="border-t border-surface-border px-3 pb-3 pt-2 space-y-3">
+                              {treeFor(mod.slug).map(group => {
+                                const total = group.modules.reduce((n, m) => n + m.actions.filter(a => !a.choice_group).length, 0)
+                                const marked = group.modules.reduce((n, m) => n + grantCount(mod.slug, m.module_key), 0)
+                                return (
+                                  <div key={group.label}>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group.label}</span>
+                                      {editable && total > 0 && (
+                                        <button type="button" onClick={() => setGroupAll(mod.slug, group, marked < total)}
+                                                className="text-[11px] text-brand hover:underline">
+                                          {marked < total ? 'Marcar grupo inteiro' : 'Desmarcar grupo'}
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="space-y-1">
+                                      {group.modules.map(m => {
+                                        const mk = `${mod.slug}|${m.module_key}`
+                                        const mOpen = openModules.has(mk)
+                                        const n = grantCount(mod.slug, m.module_key)
+                                        const choiceGroups = [...new Set(m.actions.filter(a => a.choice_group).map(a => a.choice_group))]
+                                        return (
+                                          <div key={m.module_key} className="rounded-md border border-surface-border">
+                                            <button type="button" onClick={() => toggleOpen(setOpenModules, mk)}
+                                                    className="w-full flex items-center gap-2 px-3 py-2 text-left">
+                                              {mOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+                                              <span className={`text-sm flex-1 ${n ? 'text-white' : 'text-slate-400'}`}>{m.label}</span>
+                                              {m.tags.length > 0 && <span className="text-[10px] text-emerald-400 font-semibold">R$</span>}
+                                              <span className="text-[11px] text-slate-500">{n}/{m.actions.filter(a => !a.choice_group).length + choiceGroups.length}</span>
+                                            </button>
+                                            {mOpen && (
+                                              <div className="px-3 pb-3 space-y-2">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                                                  {m.actions.filter(a => !a.choice_group).map(a => (
+                                                    <label key={a.action_key} className={`flex items-start gap-2 text-xs ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+                                                      <input type="checkbox" className="mt-0.5 accent-amber-400" disabled={!editable}
+                                                             checked={permGrants.has(gkey(mod.slug, m.module_key, a.action_key))}
+                                                             onChange={() => toggleGrant(mod.slug, m.module_key, a.action_key, null, m.actions)} />
+                                                      <span className="text-slate-300">{a.label}</span>
+                                                    </label>
+                                                  ))}
+                                                </div>
+                                                {choiceGroups.map(cg => (
+                                                  <div key={cg} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                                    {[{ action_key: '', label: 'Nenhum' }, ...m.actions.filter(a => a.choice_group === cg)].map(a => {
+                                                      const sel = a.action_key
+                                                        ? permGrants.has(gkey(mod.slug, m.module_key, a.action_key))
+                                                        : !m.actions.some(x => x.choice_group === cg && permGrants.has(gkey(mod.slug, m.module_key, x.action_key)))
+                                                      return (
+                                                        <label key={a.action_key || 'nenhum'} className={`flex items-center gap-2 text-xs ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+                                                          <input type="radio" name={`${mk}|${cg}`} className="accent-amber-400" disabled={!editable} checked={sel}
+                                                                 onChange={() => {
+                                                                   if (!a.action_key) setPermGrants(prev => { const nx = new Set(prev); m.actions.filter(x => x.choice_group === cg).forEach(x => nx.delete(gkey(mod.slug, m.module_key, x.action_key))); return nx })
+                                                                   else toggleGrant(mod.slug, m.module_key, a.action_key, cg, m.actions)
+                                                                 }} />
+                                                          <span className="text-slate-300">{a.label}</span>
+                                                        </label>
+                                                      )
+                                                    })}
+                                                  </div>
+                                                ))}
+                                                {m.tags.length > 0 && (
+                                                  <div className="pt-2 border-t border-surface-border">
+                                                    <p className="text-[11px] text-emerald-400 font-semibold mb-1">
+                                                      R$ {permValues === 'todos' ? 'Esconder só estes valores' : 'Liberar ver só estes valores'}
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                                      {m.tags.map(t => (
+                                                        <label key={t.tag_key} className={`flex items-center gap-2 text-xs ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+                                                          <input type="checkbox" className="accent-emerald-400" disabled={!editable}
+                                                                 checked={permValEx.has(gkey(mod.slug, m.module_key, t.tag_key))}
+                                                                 onChange={() => toggleValueEx(mod.slug, m.module_key, t.tag_key)} />
+                                                          <span className="text-slate-300">{t.label}</span>
+                                                        </label>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
 
                   {!permFull && permSlugs.length === 0 && (
                     <p className="text-red-400 text-xs mt-2 italic">
