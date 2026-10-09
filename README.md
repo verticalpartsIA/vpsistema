@@ -340,6 +340,7 @@ VITE_SUPABASE_ANON_KEY=eyJ...
 | 09/10/2026 | #50 | Endereço próprio por tela: login em `vpsistema.com`; `/inicio`, `/administracao`, `/painel-executivo`, `/historico` |
 | 09/10/2026 | #51 | Árvore de alçadas — topo: níveis de poder (Plenos/Médios/Baixos) e Valores R$; travas no servidor; `invite-user`/`delete-user` checam o poder. Inauguração: Gelson e Diego plenos; demais Administradores médios; Juliana vê valores |
 | 09/10/2026 | #52 | Inativação com motivo (Demissão / Suspensão de acesso) + mini-relatório; dois celulares (corporativo/pessoal) com número de notificação calculado; acesso às telas de admin não é mais logado em dobro |
+| 09/10/2026 | #57 | VPRequisições: **Ciência do gestor** no catálogo (liderados / departamento / todos — escolha única); gestores atuais herdados (9 pessoas) |
 | 09/10/2026 | #55 | Árvore de alçadas — catálogo por sistema (VP HUB 59 módulos, VPRequisições 9) e acordeão na `/administracao`: módulos → ações → exceções de valor R$; mesmas travas de poder no servidor |
 | 09/10/2026 | #54 | Bug "a cada atualização os usuários ganham poderes": sistema novo/reativado/renomeado nasce fechado; README atualizado. Mutirão de segurança acompanhado na issue #53 |
 
