@@ -1,5 +1,7 @@
 -- Central de Eventos: apoio à função de ingestão (eventos-ingest).
--- Status: aplicado e testado na branch `central-eventos`. NÃO aplicado em produção.
+-- Status: APLICADO em produção (projeto vpsistema) em 2026-10-09, após teste ponta a ponta numa
+-- branch descartável do Supabase (já apagada). Nenhum segredo de origem foi cadastrado ainda:
+-- a função de ingestão rejeita toda origem até existir `eventos_hmac_<slug>` no Vault.
 -- Pré-requisito: central_eventos.sql (schema `eventos`) e a extensão Vault (supabase_vault).
 
 alter table eventos.origens add column if not exists limite_por_minuto int not null default 300;

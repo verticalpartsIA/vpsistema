@@ -1,8 +1,10 @@
 -- Central de Eventos: schema `eventos`.
--- Status: aplicado e testado na branch `central-eventos` (lmdpfjouvpuqdfnqccnc). NÃO aplicado em produção.
--- Verificado em produção (somente leitura): o schema `eventos` não existe e `public.profiles` tem `id` e `level`.
--- Para produção: aplicar este arquivo inteiro e depois adicionar `eventos` em Settings > API > Exposed schemas.
--- Fora de supabase/migrations de propósito: só entra lá com autorização para ir à produção.
+-- Status: APLICADO em produção (projeto vpsistema) em 2026-10-09, após teste numa branch descartável
+-- do Supabase (já apagada). O schema `eventos` foi adicionado em Settings > API > Exposed schemas.
+-- Depende de `public.profiles` (colunas `id` e `level`): `eventos.is_admin()` usa o nível 'Administrador'.
+-- Este arquivo é o registro do que foi aplicado: não reexecutar em produção (as tabelas já existem).
+-- Fora de supabase/migrations de propósito, para um deploy não tentar reaplicá-lo.
+-- Complemento da ingestão (funções, limite por minuto): 02_ingestao.sql.
 create schema if not exists eventos;
 
 create table eventos.origens (
