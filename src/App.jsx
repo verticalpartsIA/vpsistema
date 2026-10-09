@@ -18,8 +18,8 @@ const SESSION_FLAG = 'vp_sessao_ativa'
 function App() {
   const [user,       setUser]       = useState(null)
   const [loading,    setLoading]    = useState(true)
-  const path = usePath() // '/' | '/login' | '/dashboard' | '/admin' | '/ceo' | '/logs'
-  // Nível do perfil (undefined = carregando). Só o Administrador abre /admin, /ceo e /logs.
+  const path = usePath() // '/' (login) | '/inicio' | '/administracao' | '/painel-executivo' | '/historico'
+  // Nível do perfil (undefined = carregando). Só o Administrador abre /administracao, /painel-executivo e /historico.
   const [level,      setLevel]      = useState(undefined)
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
@@ -35,8 +35,8 @@ function App() {
   // Guarda o id do usuário já logado — o SIGNED_IN do Supabase dispara de novo
   // (troca de aba, foco na janela, refresh de token) sem ser um login real.
   const loggedUserIdRef = useRef(null)
-  // Tela que a pessoa tentou abrir antes de fazer login (ex.: abriu /logs sem
-  // sessão) — depois do login ela cai direto lá, não no Dashboard.
+  // Tela que a pessoa tentou abrir antes de fazer login (ex.: abriu /historico
+  // sem sessão) — depois do login ela cai direto lá, não no Início.
   const nextPathRef = useRef(null)
 
   useEffect(() => {
@@ -128,8 +128,8 @@ function App() {
   // (carregando) ou fluxo de convite/link expirado, que não mexe no endereço.
   function resolvePath() {
     if (loading || linkExpired || isRecovery) return null
-    if (!user) return ROUTES.login
-    if (path === '/' || path === ROUTES.login) return nextPathRef.current || ROUTES.dashboard
+    if (!user) return ROUTES.login          // login é a raiz: vpsistema.com
+    if (path === ROUTES.login) return nextPathRef.current || ROUTES.dashboard
     if (ADMIN_PATHS.includes(path)) {
       if (level === undefined) return null
       if (level !== 'Administrador') return ROUTES.dashboard
@@ -141,9 +141,10 @@ function App() {
   // Corrige o endereço na barra (sem criar entrada nova no histórico)
   useEffect(() => {
     if (!target) return
-    if (!user && path !== '/' && path !== ROUTES.login) nextPathRef.current = path
-    if (user && target !== ROUTES.login) nextPathRef.current = null
-    if (target !== path) navigate(target, { replace: true })
+    if (!user && path !== ROUTES.login) nextPathRef.current = path
+    if (user) nextPathRef.current = null
+    // compara com a barra real: /qualquer (desconhecido) ou /inicio/ também são corrigidos
+    if (target !== window.location.pathname) navigate(target, { replace: true })
   }, [target, path, user])
 
   // Auditoria: registra a entrada nas telas de administrador, inclusive
