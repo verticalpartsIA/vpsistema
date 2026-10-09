@@ -15,6 +15,7 @@ import {
   Bot,
   FileSignature,
   Users,
+  BrainCircuit,
   ExternalLink,
 } from 'lucide-react'
 
@@ -30,6 +31,7 @@ export const MODULE_ICONS = {
   Bot,
   FileSignature,
   Users,
+  BrainCircuit, // VP HUB (cotacao-importacao) — cérebro com ligações, estilo grafo
 }
 
 /** Retorna o componente de ícone pelo nome (string vinda do banco).

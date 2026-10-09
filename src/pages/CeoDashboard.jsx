@@ -52,8 +52,8 @@ const APP_LABELS = {
   visitas:            'Visitas e Brindes',
   catraca:            'Catraca',
   propostas:          'Propostas',
-  vpgestaoimportacao: 'Cotação Importação', // histórico, domínio antigo (vpgestaoimportacao.vpsistema.com)
-  hub:                'Cotação Importação', // domínio atual (hub.vpsistema.com)
+  vpgestaoimportacao: 'VP HUB', // histórico, domínio antigo (vpgestaoimportacao.vpsistema.com)
+  hub:                'VP HUB', // domínio atual (hub.vpsistema.com)
 }
 
 const LOG_ACTION_META = {
