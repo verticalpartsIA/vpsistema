@@ -202,17 +202,19 @@ begin
 end $$;
 
 -- ─────────────────────────────────────────────────────────── Worker: reservar, registrar, recuperar
--- Envios que ficaram "processando" (worker caiu) voltam para a fila; passou de 5 tentativas = falha.
+-- Envio "processando" há mais de 10 min: o worker caiu ou não conseguiu gravar o resultado, e a mensagem PODE ter
+-- sido entregue. Para não mandar duas vezes à mesma pessoa, NÃO volta para a fila: vira falha com o motivo, e um
+-- administrador decide pela aba Falhas (Reenviar). (O worker que fica sem tempo ou sem configuração usa
+-- devolver_envio, que é seguro porque ainda não chamou o canal.)
 create or replace function eventos.recuperar_travados() returns int
 language plpgsql security definer set search_path = eventos, pg_temp as $$
 declare n int;
 begin
-  update eventos.tentativas t set resultado = 'interrompida', erro = 'worker não concluiu'
+  update eventos.tentativas t set resultado = 'interrompida', erro = 'resultado incerto: worker não concluiu'
    where t.resultado = 'em_andamento' and t.iniciada_em < now() - interval '10 minutes';
   update eventos.envios e
-     set status = case when e.tentativas >= 5 then 'falha' else 'pendente' end,
-         motivo_descarte = case when e.tentativas >= 5 then 'worker não concluiu após 5 tentativas' else e.motivo_descarte end,
-         proxima_tentativa_em = now()
+     set status = 'falha', proxima_tentativa_em = null,
+         motivo_descarte = 'resultado incerto: o worker não confirmou o envio. Confira com o destinatário antes de reenviar.'
    where e.status = 'processando' and e.reservado_em < now() - interval '10 minutes';
   get diagnostics n = row_count;
   return n;
@@ -226,6 +228,12 @@ language plpgsql security definer set search_path = eventos, public, pg_temp as 
 declare cn record; v_cap int; v_ids uuid[]; v_restante int := p_limite;
 begin
   perform eventos.recuperar_travados();
+
+  -- Interruptor de segurança: o que está na fila de um gatilho que deixou de ser 'ativo' (voltou para sombra,
+  -- foi desligado ou desativado) NÃO é entregue. Fica 'cancelado', com o motivo.
+  update eventos.envios e set status = 'cancelado', motivo_descarte = 'gatilho_nao_ativo'
+    from eventos.regras rg join eventos.catalogo_gatilhos g on g.id = rg.gatilho_id
+   where rg.id = e.regra_id and e.status = 'pendente' and (g.modo <> 'ativo' or not g.ativo);
 
   for cn in select * from eventos.canais c where c.ativo order by c.slug loop
     exit when v_restante <= 0;
@@ -246,6 +254,8 @@ begin
       select e.id from eventos.envios e
        where e.canal = cn.slug and e.status = 'pendente' and e.agendado_para <= now()
          and coalesce(e.proxima_tentativa_em, e.agendado_para) <= now()
+         and exists (select 1 from eventos.regras rg join eventos.catalogo_gatilhos g on g.id = rg.gatilho_id
+                      where rg.id = e.regra_id and g.ativo and g.modo = 'ativo')
        order by e.agendado_para, e.id
        limit least(v_cap, v_restante) for update skip locked) x;
     continue when v_ids is null;
@@ -323,6 +333,11 @@ begin
   if not eventos.is_admin() then raise exception 'apenas administrador' using errcode = '42501'; end if;
   select to_jsonb(e) into antes from eventos.envios e where e.id = p_envio and e.status in ('falha', 'descartado') for update;
   if antes is null then return false; end if;
+  if not exists (select 1 from eventos.envios e join eventos.regras rg on rg.id = e.regra_id
+                   join eventos.catalogo_gatilhos g on g.id = rg.gatilho_id
+                  where e.id = p_envio and g.ativo and g.modo = 'ativo') then
+    raise exception 'o gatilho deste envio não está ativo: ative-o no Catálogo antes de reenviar' using errcode = '55000';
+  end if;
 
   update eventos.envios set status = 'pendente', tentativas = 0, proxima_tentativa_em = now(),
          agendado_para = now(), motivo_descarte = null where id = p_envio

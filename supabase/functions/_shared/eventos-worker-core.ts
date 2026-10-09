@@ -33,6 +33,14 @@ export function mascararTelefone(tel: string | null | undefined): string {
   return d.length >= 6 ? `${d.slice(0, 2)}•••••${d.slice(-4)}` : '—'
 }
 
+/**
+ * Troca qualquer sequência de 8 ou mais dígitos (telefone, mesmo formatado) por um marcador. Serve para o texto de erro
+ * devolvido pela Evolution, que às vezes repete o número do pedido, antes de ir para o banco ou para o log.
+ */
+export function redigirNumeros(texto: string): string {
+  return texto.replace(/\+?\(?\d[\d\s().-]{6,}\d/g, (m) => (m.replace(/\D/g, '').length >= 8 ? '[número]' : m))
+}
+
 /** Quantos envios cabem no tempo da execução, dado o intervalo mínimo entre mensagens. */
 export function tamanhoDoLote(intervaloMs: number, orcamentoMs = BUDGET_MS, maximo = 20): number {
   const i = Math.max(intervaloMs, 250)
@@ -48,7 +56,7 @@ export function tamanhoDoLote(intervaloMs: number, orcamentoMs = BUDGET_MS, maxi
  */
 export function classificarResposta(status: number, corpo: string): Resultado {
   if (status >= 200 && status < 300) return { resultado: 'enviado', http: status }
-  const trecho = corpo.replace(/\s+/g, ' ').slice(0, 200)
+  const trecho = redigirNumeros(corpo.replace(/\s+/g, ' ')).slice(0, 200)
   const permanente = status === 400 || status === 404 || status === 422
   return { resultado: 'erro', http: status, erro: `Evolution ${status}: ${trecho}`, permanente }
 }

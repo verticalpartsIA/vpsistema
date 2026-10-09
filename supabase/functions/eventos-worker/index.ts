@@ -6,7 +6,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import { normalizePhoneBR } from '../_shared/whatsapp.ts'
 import {
   BUDGET_MS, classificarResposta, extrairIdExterno, mascararTelefone, montarEnvioWhatsApp,
-  tamanhoDoLote, validarReserva,
+  redigirNumeros, tamanhoDoLote, validarReserva,
   type Reserva, type Resultado,
 } from '../_shared/eventos-worker-core.ts'
 
@@ -34,7 +34,7 @@ async function enviarWhatsApp(r: Reserva): Promise<Resultado> {
     const base = classificarResposta(res.status, corpo)
     return base.resultado === 'enviado' ? { ...base, idExterno: extrairIdExterno(corpo) } : base
   } catch (e) {
-    return { resultado: 'erro', erro: `rede: ${String((e as Error)?.message || e).slice(0, 200)}` }
+    return { resultado: 'erro', erro: `rede: ${redigirNumeros(String((e as Error)?.message || e)).slice(0, 200)}` }
   }
 }
 
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
   if (!ok) return json({ error: 'Não autorizado' }, 401)
 
   const inicio = Date.now()
-  const resumo = { reservados: 0, enviados: 0, falhas: 0, devolvidos: 0 }
+  const resumo: Record<string, number> = { reservados: 0, enviados: 0, falhas: 0, devolvidos: 0 }
 
   // O limite do lote depende do intervalo do canal; começa pelo padrão do WhatsApp (2 s).
   const { data: lote, error: errReserva } = await admin.rpc('reservar_envios', { p_limite: tamanhoDoLote(2000) })
@@ -82,15 +82,23 @@ Deno.serve(async (req) => {
       continue
     }
 
-    const { error } = await admin.rpc('registrar_tentativa', {
-      p_envio: r.envio_id,
-      p_resultado: res.resultado,
-      p_http: res.http ?? null,
-      p_erro: res.erro ?? null,
-      p_id_externo: res.idExterno ?? null,
-      p_permanente: res.permanente ?? false,
-    })
-    if (error) console.error('eventos-worker: registrar_tentativa falhou:', r.envio_id, error.message)
+    // Gravar o resultado é o que impede um segundo envio da mesma mensagem: insiste antes de seguir. Se mesmo assim
+    // falhar, o envio fica "processando" e depois vira falha com "resultado incerto" (nunca é reenviado sozinho).
+    let gravado = false
+    for (const espera of [0, 500, 1500]) {
+      if (espera) await sleep(espera)
+      const { error } = await admin.rpc('registrar_tentativa', {
+        p_envio: r.envio_id,
+        p_resultado: res.resultado,
+        p_http: res.http ?? null,
+        p_erro: res.erro ?? null,
+        p_id_externo: res.idExterno ?? null,
+        p_permanente: res.permanente ?? false,
+      })
+      if (!error) { gravado = true; break }
+      console.error('eventos-worker: registrar_tentativa falhou:', r.envio_id, error.message)
+    }
+    if (!gravado) resumo.semRegistro = (resumo.semRegistro ?? 0) + 1
 
     if (res.resultado === 'enviado') resumo.enviados++
     else {

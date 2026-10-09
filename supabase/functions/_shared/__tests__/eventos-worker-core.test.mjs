@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  classificarResposta, extrairIdExterno, mascararTelefone, montarEnvioWhatsApp, tamanhoDoLote, validarReserva,
+  classificarResposta, extrairIdExterno, mascararTelefone, montarEnvioWhatsApp, redigirNumeros, tamanhoDoLote, validarReserva,
 } from '../eventos-worker-core.ts'
 
 const reserva = (o = {}) => ({ envio_id: 'e1', canal: 'whatsapp', tentativa: 1, whatsapp: '11987654321',
@@ -60,4 +60,15 @@ test('validação da reserva antes de chamar o canal', () => {
   assert.match(validarReserva(reserva({ canal: 'sms' })).erro, /desconhecido/)
   for (const c of ['email', 'interno', 'sms']) assert.equal(validarReserva(reserva({ canal: c })).permanente, true)
   assert.equal(validarReserva(reserva({ whatsapp: '5511987654321' })), null) // 55 na frente é aceito
+})
+
+test('números de telefone saem do texto de erro', () => {
+  assert.equal(redigirNumeros('número 5511987654321 não existe'), 'número [número] não existe')
+  assert.equal(redigirNumeros('ligue (11) 98765-4321 agora'), 'ligue [número] agora')
+  assert.equal(redigirNumeros('+55 11 98765 4321'), '[número]')
+  assert.equal(redigirNumeros('HTTP 503 em 2026'), 'HTTP 503 em 2026')           // números curtos ficam
+  assert.equal(redigirNumeros('sem números'), 'sem números')
+  const e = classificarResposta(400, '{"exists":false,"number":"5511987654321","jid":"5511987654321@s.whatsapp.net"}')
+  assert.ok(!/\d{8,}/.test(e.erro), e.erro)
+  assert.match(e.erro, /\[número\]/)
 })
