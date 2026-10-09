@@ -8,6 +8,7 @@ import ActivityLog  from './pages/ActivityLog'
 import { logActivity } from './lib/activityLog'
 import { watchForNewVersion } from './lib/versionWatch'
 import UpdateToast from './components/UpdateToast'
+import { ROUTES, ADMIN_PATHS, navigate, usePath } from './lib/router'
 import { Loader2 } from 'lucide-react'
 
 // Marca de "esta aba já esteve logada" — só um booleano, some ao fechar a aba.
@@ -17,7 +18,9 @@ const SESSION_FLAG = 'vp_sessao_ativa'
 function App() {
   const [user,       setUser]       = useState(null)
   const [loading,    setLoading]    = useState(true)
-  const [view,       setView]       = useState('dashboard') // 'dashboard' | 'admin' | 'ceo' | 'logs'
+  const path = usePath() // '/' (login) | '/inicio' | '/administracao' | '/painel-executivo' | '/historico'
+  // Nível do perfil (undefined = carregando). Só o Administrador abre /administracao, /painel-executivo e /historico.
+  const [level,      setLevel]      = useState(undefined)
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
@@ -32,6 +35,9 @@ function App() {
   // Guarda o id do usuário já logado — o SIGNED_IN do Supabase dispara de novo
   // (troca de aba, foco na janela, refresh de token) sem ser um login real.
   const loggedUserIdRef = useRef(null)
+  // Tela que a pessoa tentou abrir antes de fazer login (ex.: abriu /historico
+  // sem sessão) — depois do login ela cai direto lá, não no Início.
+  const nextPathRef = useRef(null)
 
   useEffect(() => {
     const hash = window.location.hash
@@ -85,7 +91,6 @@ function App() {
       }
       setUser(session?.user ?? null)
       if (!session?.user) {
-        setView('dashboard')
         setIsRecovery(false)
       }
     })
@@ -109,6 +114,46 @@ function App() {
       document.removeEventListener('input', markTyped, true)
     }
   }, [])
+
+  // Nível do perfil, para liberar (ou não) as telas de administrador
+  useEffect(() => {
+    if (!user) { setLevel(undefined); return }
+    let cancelled = false
+    supabase.from('profiles').select('level').eq('id', user.id).single()
+      .then(({ data }) => { if (!cancelled) setLevel(data?.level ?? null) })
+    return () => { cancelled = true }
+  }, [user])
+
+  // Para onde o endereço atual deve levar. null = ainda não dá para decidir
+  // (carregando) ou fluxo de convite/link expirado, que não mexe no endereço.
+  function resolvePath() {
+    if (loading || linkExpired || isRecovery) return null
+    if (!user) return ROUTES.login          // login é a raiz: vpsistema.com
+    if (path === ROUTES.login) return nextPathRef.current || ROUTES.dashboard
+    if (ADMIN_PATHS.includes(path)) {
+      if (level === undefined) return null
+      if (level !== 'Administrador') return ROUTES.dashboard
+    }
+    return path
+  }
+  const target = resolvePath()
+
+  // Corrige o endereço na barra (sem criar entrada nova no histórico)
+  useEffect(() => {
+    if (!target) return
+    if (!user && path !== ROUTES.login) nextPathRef.current = path
+    if (user) nextPathRef.current = null
+    // compara com a barra real: /qualquer (desconhecido) ou /inicio/ também são corrigidos
+    if (target !== window.location.pathname) navigate(target, { replace: true })
+  }, [target, path, user])
+
+  // Auditoria: registra a entrada nas telas de administrador, inclusive
+  // quando a pessoa abre o endereço direto (favorito, link colado).
+  useEffect(() => {
+    if (target === ROUTES.admin) logActivity({ action: 'admin_access' })
+    if (target === ROUTES.ceo)   logActivity({ action: 'ceo_access' })
+    if (target === ROUTES.logs)  logActivity({ action: 'log_access' })
+  }, [target])
 
   if (loading) {
     return (
@@ -157,25 +202,36 @@ function App() {
       )
     }
 
-    if (view === 'admin') {
-      return <Admin onBack={() => setView('dashboard')} />
+    // Ainda conferindo o nível do perfil para uma tela de administrador
+    if (!target) {
+      return (
+        <div className="min-h-screen bg-surface flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-brand animate-spin" />
+        </div>
+      )
     }
 
-    if (view === 'ceo') {
-      return <CeoDashboard onBack={() => setView('dashboard')} />
+    const backToDashboard = () => navigate(ROUTES.dashboard)
+
+    if (target === ROUTES.admin) {
+      return <Admin onBack={backToDashboard} />
     }
 
-    if (view === 'logs') {
-      return <ActivityLog onBack={() => setView('dashboard')} />
+    if (target === ROUTES.ceo) {
+      return <CeoDashboard onBack={backToDashboard} />
+    }
+
+    if (target === ROUTES.logs) {
+      return <ActivityLog onBack={backToDashboard} />
     }
 
     return (
       <Dashboard
         user={user}
         onSignOutStart={() => { signingOutRef.current = true }}
-        onNavigateAdmin={() => { logActivity({ action: 'admin_access' }); setView('admin') }}
-        onNavigateCeo={()   => { logActivity({ action: 'ceo_access'   }); setView('ceo')   }}
-        onNavigateLogs={() => { logActivity({ action: 'log_access'    }); setView('logs')  }}
+        onNavigateAdmin={() => navigate(ROUTES.admin)}
+        onNavigateCeo={()   => navigate(ROUTES.ceo)}
+        onNavigateLogs={()  => navigate(ROUTES.logs)}
       />
     )
   }
