@@ -364,11 +364,13 @@ function Fila() {
 
 function Falhas() {
   const [versao, setVersao] = useState(0)
+  // Passa pela função do banco (eventos.reenviar_envio): confere que é administrador, zera as
+  // tentativas e grava quem reenviou na auditoria. Não atualiza a tabela diretamente.
   async function reenviar(id) {
-    const { error } = await eventos().from('envios')
-      .update({ status: 'pendente', proxima_tentativa_em: new Date().toISOString() }).eq('id', id)
+    const { data, error } = await eventos().rpc('reenviar_envio', { p_envio: id })
     if (error) window.alert('Não foi possível reenviar: ' + error.message)
-    else setVersao(v => v + 1)
+    else if (data === false) window.alert('Este envio não está mais em falha ou descartado.')
+    setVersao(v => v + 1)
   }
   return (
     <TabelaBanco tabela="envios" select="id,canal,status,tentativas,agendado_para,motivo_descarte,destinatarios(nome)" ordem="agendado_para"
