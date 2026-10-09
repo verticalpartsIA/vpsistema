@@ -140,6 +140,8 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
   }
 
   const isAdmin   = profile?.level === 'Administrador'
+  // Administração abre para quem tem nível de poder (plenos | medios | baixos)
+  const hasPower  = Boolean(profile?.power_level)
   const firstName = profile?.name?.split(' ')[0] || user.email.split('@')[0]
   const avatarUrl = profile?.avatar_url || null
 
@@ -201,7 +203,7 @@ export default function Dashboard({ user, onNavigateAdmin, onNavigateCeo, onNavi
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
 
             {/* Cards admin — aparecem primeiro, no canto superior esquerdo */}
-            {isAdmin && (
+            {hasPower && (
               <button
                 onClick={onNavigateAdmin}
                 className="group relative overflow-hidden bg-surface-card border border-surface-border

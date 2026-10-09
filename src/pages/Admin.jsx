@@ -4,7 +4,7 @@ import { logActivity } from '../lib/activityLog'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
   CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
-  ChevronRight, ChevronDown, Star
+  ChevronRight, ChevronDown, Star, KeyRound, Lock, LockOpen, Puzzle, Repeat
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
@@ -22,6 +22,31 @@ export const DEPARTMENTS = [
   'Marketing',
 ]
 const LEVELS = ['Administrador', 'Lider', 'Colaborador']
+
+// Topo da árvore de permissões (migration 20261009120000_poderes_e_valores).
+// As regras de quem altera o quê valem no banco; aqui a tela só as reflete.
+const POWER_LEVELS = [
+  { value: 'plenos', label: 'Plenos', hint: 'Igual ao Gelson e ao Diego, inclusive dar poderes a si mesmo.' },
+  { value: 'medios', label: 'Médios', hint: 'Dá poderes a quem está abaixo, mas nunca a si mesmo.' },
+  { value: 'baixos', label: 'Baixos', hint: 'Não abre valores e não dá poderes. Ajusta só departamento e status.' },
+  { value: '',       label: 'Nenhum', hint: 'Não abre a Administração.' },
+]
+const POWER_LABEL = { plenos: 'Plenos', medios: 'Médios', baixos: 'Baixos' }
+
+// Inativação: 1ª pergunta é o motivo. Só "Demissão" abre o checklist de
+// devolução de ativos. "Suspensão de acesso" cobre afastamento, licença ou
+// motivo ainda não definido (decisão do Gelson, 09/10/2026).
+const INACTIVATION_REASONS = [
+  { value: 'demissao',  label: 'Demissão',            hint: 'Desligamento da empresa. Abre o checklist de devolução.' },
+  { value: 'suspensao', label: 'Suspensão de acesso', hint: 'Afastamento, licença ou motivo ainda não definido. Reversível.' },
+]
+const REASON_LABEL = { demissao: 'Demissão', suspensao: 'Suspensão de acesso' }
+const RETURN_ITEMS = ['Crachá', 'Celular corporativo', 'Notebook']
+const RETURN_STATUS = [
+  { value: 'devolvido',   label: 'Devolvido' },
+  { value: 'pendente',    label: 'Pendente' },
+  { value: 'nao_possuia', label: 'Não possuía' },
+]
 
 // Nome de departamento → id utilizável em HTML (o aria-controls do botão de
 // expandir precisa casar com o id do <tbody> do grupo).
@@ -73,14 +98,35 @@ export default function Admin({ onBack }) {
   const [permLevel,     setPermLevel]     = useState('')     // nível em edição
   const [permDept,      setPermDept]      = useState('')     // departamento em edição
   const [permIsLead,    setPermIsLead]    = useState(false)  // líder de departamento em edição
+  const [permPower,     setPermPower]     = useState('')     // nível de poder em edição ('' = nenhum)
+  // Árvore de alçadas por sistema (catálogo + o que a pessoa pode em cada módulo)
+  const [catalog,       setCatalog]       = useState({ modules: [], actions: [], tags: [] })
+  const [permGrants,    setPermGrants]    = useState(new Set())  // "sistema|módulo|ação"
+  const [permValEx,     setPermValEx]     = useState(new Map())  // "sistema|módulo|etiqueta" → allow
+  const [origGrants,    setOrigGrants]    = useState(new Set())
+  const [origValEx,     setOrigValEx]     = useState(new Map())
+  const [openSystems,   setOpenSystems]   = useState(new Set())  // sistemas com a árvore aberta
+  const [openModules,   setOpenModules]   = useState(new Set())  // "sistema|módulo" abertos
+  // Substituição temporária (férias): ciência/aprovação do titular passam a outra pessoa
+  const [substs,        setSubsts]        = useState([])
+  const emptySub = { system_slug: '', tipo: 'ciencia', substituto_id: '', inicio: '', fim: '', motivo: '', titular_mantem: true, herda_nivel: true }
+  const [newSub,        setNewSub]        = useState(emptySub)
+  const [subMsg,        setSubMsg]        = useState(null)
+  const [permValues,    setPermValues]    = useState('nenhum') // valores R$: 'nenhum' | 'todos'
   const [permSlugs,     setPermSlugs]     = useState([])     // slugs marcados ([] = acesso pleno)
   const [permFull,      setPermFull]      = useState(true)   // toggle "acesso total"
   const [permLoading,   setPermLoading]   = useState(false)
   const [permSaving,    setPermSaving]    = useState(false)
   const [permMsg,       setPermMsg]       = useState(null)
+  const [focusSystem,   setFocusSystem]   = useState(null)   // clique no ícone → janela só daquele sistema
 
   // Modal inativação
   const [toggleUser,    setToggleUser]    = useState(null)
+  const [inactReason,   setInactReason]   = useState('')   // 'demissao' | 'suspensao'
+  const [inactReturns,  setInactReturns]  = useState({})   // { [item]: status }
+  const [inactOther,    setInactOther]    = useState('')   // outro item devolvido/pendente
+  const [inactNote,     setInactNote]     = useState('')
+  const [lastInact,     setLastInact]     = useState(null) // mini-relatório da última inativação (reativar)
 
   // Modal exclusão
   const [deleteUser,    setDeleteUser]    = useState(null)
@@ -90,8 +136,10 @@ export default function Admin({ onBack }) {
   // Modal editar colaborador (nome, função, celular)
   const [editNameUser,  setEditNameUser]  = useState(null)   // usuário sendo editado
   const [editNameValue, setEditNameValue] = useState('')
+  const [editEmailValue, setEditEmailValue] = useState('')  // troca de e-mail = troca de login em todo o ecossistema
   const [editFuncaoValue, setEditFuncaoValue] = useState('')
-  const [editCelularValue, setEditCelularValue] = useState('')
+  const [editCorpValue,    setEditCorpValue]    = useState('')   // celular corporativo
+  const [editPessValue,    setEditPessValue]    = useState('')   // celular pessoal
   const [editNameSaving, setEditNameSaving] = useState(false)
   const [editNameMsg,   setEditNameMsg]   = useState(null)
 
@@ -106,15 +154,132 @@ export default function Admin({ onBack }) {
   // padrão para todo colaborador; module_permissions só guarda exceções.
   const [blocksMap, setBlocksMap] = useState({})
 
+  // Quem está usando a tela — define o que ela pode alterar em cada pessoa
+  const [myId, setMyId] = useState(null)
+  const myPower = users.find(u => u.id === myId)?.power_level || null
+
+  // ── Árvore de alçadas (catálogo por sistema) ─────────────────────────────
+  const catalogSystems = new Set(catalog.modules.map(m => m.system_slug))
+  function treeFor(slug) {
+    const groups = []
+    for (const m of catalog.modules.filter(x => x.system_slug === slug)) {
+      let g = groups.find(x => x.label === m.group_label)
+      if (!g) { g = { label: m.group_label, modules: [] }; groups.push(g) }
+      g.modules.push({
+        ...m,
+        actions: catalog.actions.filter(a => a.system_slug === slug && a.module_key === m.module_key),
+        tags:    catalog.tags.filter(t => t.system_slug === slug && t.module_key === m.module_key),
+      })
+    }
+    return groups
+  }
+  const gkey = (sys, mod, act) => `${sys}|${mod}|${act}`
+  function grantCount(slug, mod) {
+    const prefix = mod ? `${slug}|${mod}|` : `${slug}|`
+    let n = 0; permGrants.forEach(k => { if (k.startsWith(prefix)) n++ }); return n
+  }
+  function toggleGrant(sys, mod, act, choiceGroup, actionsOfModule) {
+    setPermGrants(prev => {
+      const next = new Set(prev)
+      const k = gkey(sys, mod, act)
+      if (next.has(k)) { next.delete(k); return next }
+      if (choiceGroup) actionsOfModule.filter(a => a.choice_group === choiceGroup).forEach(a => next.delete(gkey(sys, mod, a.action_key)))
+      next.add(k); return next
+    })
+  }
+  function setGroupAll(sys, group, on) {
+    setPermGrants(prev => {
+      const next = new Set(prev)
+      group.modules.forEach(m => m.actions.forEach(a => {
+        const k = gkey(sys, m.module_key, a.action_key)
+        if (on && !a.choice_group) next.add(k); if (!on) next.delete(k)
+      }))
+      return next
+    })
+  }
+  function toggleValueEx(sys, mod, tag) {
+    const k = gkey(sys, mod, tag)
+    const allow = permValues !== 'todos'      // 🔒 → exceção libera · 🔓 → exceção esconde
+    setPermValEx(prev => { const next = new Map(prev); if (next.has(k)) next.delete(k); else next.set(k, allow); return next })
+  }
+  function toggleOpen(setter, key) { setter(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n }) }
+
+  // ── Substituição temporária ──────────────────────────────────────────────
+  // Sistemas que têm ciência/aprovação no catálogo (hoje: VPRequisições)
+  const substSystems = [...new Set(catalog.modules.filter(m => m.module_key === 'ciencia' || m.module_key === 'aprovacao').map(m => m.system_slug))]
+  async function loadSubsts(titularId) {
+    const today = new Date().toISOString().slice(0, 10)
+    const { data } = await supabase.from('alcada_substitutions').select('*')
+      .eq('titular_id', titularId).is('cancelado_em', null).gte('fim', today).order('inicio')
+    setSubsts(data || [])
+  }
+  async function addSubst() {
+    setSubMsg(null)
+    const n = newSub
+    if (!n.system_slug || !n.substituto_id || !n.inicio || !n.fim) {
+      setSubMsg({ type: 'error', text: 'Preencha sistema, quem assume, início e fim.' }); return
+    }
+    const { error } = await supabase.from('alcada_substitutions').insert({
+      titular_id: permUser.id, substituto_id: n.substituto_id, system_slug: n.system_slug, tipo: n.tipo,
+      inicio: n.inicio, fim: n.fim, motivo: n.motivo.trim() || null,
+      titular_mantem: n.titular_mantem, herda_nivel: n.herda_nivel, criado_por: myId,
+    })
+    if (error) { setSubMsg({ type: 'error', text: error.message }); return }
+    logActivity({
+      action: 'add_substitution', target: permUser.name || permUser.email,
+      details: {
+        substituto: users.find(x => x.id === n.substituto_id)?.name || '—',
+        tipo: n.tipo === 'ciencia' ? 'Ciência' : 'Aprovação financeira',
+        periodo: `${n.inicio} → ${n.fim}`, titular_continua: n.titular_mantem, herda_nivel: n.herda_nivel,
+      },
+    })
+    setNewSub(emptySub); setSubMsg({ type: 'success', text: 'Substituição cadastrada.' })
+    loadSubsts(permUser.id)
+  }
+  async function cancelSubst(sub) {
+    const { error } = await supabase.from('alcada_substitutions')
+      .update({ cancelado_em: new Date().toISOString(), cancelado_por: myId }).eq('id', sub.id)
+    if (error) { setSubMsg({ type: 'error', text: error.message }); return }
+    logActivity({ action: 'cancel_substitution', target: permUser.name || permUser.email, details: { tipo: sub.tipo, periodo: `${sub.inicio} → ${sub.fim}` } })
+    loadSubsts(permUser.id)
+  }
+
+  /** Pode alterar os PODERES (cargo, liderança, valores, sistemas) de `u`? */
+  function canGrantTo(u) {
+    if (!u) return false
+    if (myPower === 'plenos') return true
+    if (myPower === 'medios') return u.id !== myId && (!u.power_level || u.power_level === 'baixos')
+    return false
+  }
+  /** Pode alterar departamento/status de `u`? (baixos: só de quem não tem poder) */
+  function canEditDeptOf(u) {
+    if (!u) return false
+    if (canGrantTo(u)) return true
+    return myPower === 'baixos' && u.id !== myId && !u.power_level
+  }
+  /** Por que não pode — exibido no topo da janela. */
+  function grantBlockReason(u) {
+    if (canGrantTo(u)) return null
+    if (u.id === myId) return 'Você não pode alterar os seus próprios poderes. Só quem tem poderes plenos pode.'
+    if (myPower === 'medios') return 'Com poderes médios você só altera quem está abaixo de você (poder baixo ou nenhum).'
+    return 'Com poderes baixos você não dá poderes nem libera valores.'
+  }
+
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
     setLoading(true)
+    supabase.auth.getUser().then(({ data }) => setMyId(data?.user?.id ?? null))
     const [{ data: u }, { data: m }, { data: allPerms }] = await Promise.all([
       supabase.from('profiles').select('*').order('name'),
       supabase.from('modules').select('*').eq('is_active', true).order('sort_order'),
       supabase.from('module_permissions').select('user_id, module_slug, can_access'),
     ])
+    Promise.all([
+      supabase.from('catalog_modules').select('*').order('sort_order'),
+      supabase.from('catalog_actions').select('*').order('sort_order'),
+      supabase.from('catalog_value_tags').select('*').order('sort_order'),
+    ]).then(([cm, ca, ct]) => setCatalog({ modules: cm.data || [], actions: ca.data || [], tags: ct.data || [] }))
     setUsers(u || [])
     setModules(m || [])
 
@@ -139,13 +304,30 @@ export default function Admin({ onBack }) {
   // Inativar tira o acesso da pessoa a todos os sistemas na hora, e o botão
   // fica encostado no "Excluir" — clique errado custa caro. Reativar é inócuo,
   // então só a inativação passa pela confirmação.
-  function requestToggleActive(u) {
-    if (u.is_active) setToggleUser(u)
-    else toggleActive(u)
+  async function requestToggleActive(u) {
+    setInactReason(''); setInactReturns({}); setInactOther(''); setInactNote(''); setLastInact(null)
+    if (!u.is_active) {
+      const { data } = await supabase
+        .from('profile_inactivations')
+        .select('*')
+        .eq('user_id', u.id)
+        .is('reativado_em', null)
+        .order('inativado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      setLastInact(data || null)
+    }
+    setToggleUser(u)
   }
 
   async function toggleActive(u) {
     const newStatus = !u.is_active
+    const devolucoes = inactReason === 'demissao'
+      ? [
+          ...RETURN_ITEMS.map(item => ({ item, status: inactReturns[item] || 'pendente' })),
+          ...(inactOther.trim() ? [{ item: inactOther.trim(), status: inactReturns.__outro || 'pendente' }] : []),
+        ]
+      : []
     setToggleUser(null)
     const { error } = await supabase
       .from('profiles')
@@ -153,13 +335,35 @@ export default function Admin({ onBack }) {
       .eq('id', u.id)
 
     if (error) {
-      setActionMsg({ type: 'error', text: `Erro ao atualizar ${u.name}.` })
+      setActionMsg({ type: 'error', text: error.message || `Erro ao atualizar ${u.name}.` })
     } else {
+      // Mini-relatório: abre na inativação, fecha na reativação
+      if (!newStatus) {
+        await supabase.from('profile_inactivations').insert({
+          user_id: u.id,
+          motivo: inactReason,
+          observacao: inactNote.trim() || null,
+          devolucoes,
+          inativado_por: myId,
+        })
+      } else if (lastInact) {
+        await supabase.from('profile_inactivations')
+          .update({ reativado_em: new Date().toISOString(), reativado_por: myId })
+          .eq('id', lastInact.id)
+      }
       setUsers(prev => prev.map(p => p.id === u.id ? { ...p, is_active: newStatus } : p))
+      const pendentes = devolucoes.filter(d => d.status === 'pendente').map(d => d.item)
       logActivity({
         action: newStatus ? 'reactivate_user' : 'deactivate_user',
         target: u.email || u.name,
-        details: { nome: u.name },
+        details: newStatus
+          ? { nome: u.name, motivo_anterior: REASON_LABEL[lastInact?.motivo] || '—' }
+          : {
+              nome: u.name,
+              motivo: REASON_LABEL[inactReason],
+              ...(inactReason === 'demissao' ? { devolucoes_pendentes: pendentes.length ? pendentes.join(', ') : 'nenhuma' } : {}),
+              ...(inactNote.trim() ? { observacao: inactNote.trim() } : {}),
+            },
       })
       setActionMsg({
         type: 'success',
@@ -172,8 +376,10 @@ export default function Admin({ onBack }) {
   function openEditProfile(u) {
     setEditNameUser(u)
     setEditNameValue(u.name || '')
+    setEditEmailValue(u.email || '')
     setEditFuncaoValue(u.job_title || '')
-    setEditCelularValue(u.celular || '')
+    setEditCorpValue(u.celular_corporativo || '')
+    setEditPessValue(u.celular_pessoal || '')
     setEditNameMsg(null)
   }
 
@@ -184,15 +390,45 @@ export default function Admin({ onBack }) {
       return
     }
     const newFuncao  = editFuncaoValue.trim() || null
-    const newCelular = editCelularValue.replace(/\D/g, '') || null
+    const newCorp    = editCorpValue.replace(/\D/g, '') || null
+    const newPess    = editPessValue.replace(/\D/g, '') || null
 
     const oldName    = editNameUser.name
     const oldFuncao  = editNameUser.job_title || null
-    const oldCelular = editNameUser.celular || null
-    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCelular === oldCelular
+    const oldCorp    = editNameUser.celular_corporativo || null
+    const oldPess    = editNameUser.celular_pessoal || null
+    const newEmail   = editEmailValue.trim().toLowerCase()
+    const oldEmail   = (editNameUser.email || '').toLowerCase()
+    const emailChanged = Boolean(newEmail) && newEmail !== oldEmail
+    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCorp === oldCorp && newPess === oldPess && !emailChanged
     if (nothingChanged) {
       setEditNameUser(null)
       return
+    }
+
+    // E-mail é o login e a chave com os outros sistemas: troca pelo servidor,
+    // que atualiza login + cadastro + satélites de uma vez.
+    if (emailChanged) {
+      setEditNameSaving(true)
+      setEditNameMsg(null)
+      const { data: res, error: fnErr } = await supabase.functions.invoke('update-user-email', {
+        body: { user_id: editNameUser.id, new_email: newEmail },
+      })
+      const fnMsg = res?.error || (fnErr && (await fnErr.context?.json?.().catch(() => null))?.error) || fnErr?.message
+      if (fnErr || res?.error) {
+        setEditNameMsg({ type: 'error', text: fnMsg || 'Erro ao trocar o e-mail.' })
+        setEditNameSaving(false)
+        return
+      }
+      setUsers(prev => prev.map(p => p.id === editNameUser.id ? { ...p, email: newEmail } : p))
+      logActivity({
+        action: 'change_email', target: newEmail,
+        details: {
+          nome: editNameUser.name, email: `${oldEmail || '—'} → ${newEmail}`,
+          sistemas: (res?.platforms || []).map(x => `${x.platform}: ${x.status}`).join(' · ') || '—',
+        },
+      })
+      setEditNameSaving(false)
     }
 
     setEditNameSaving(true)
@@ -200,7 +436,9 @@ export default function Admin({ onBack }) {
 
     const { error } = await supabase
       .from('profiles')
-      .update({ name: newName, job_title: newFuncao, celular: newCelular })
+      // `celular` (número de notificação) é recalculado pelo banco:
+      // corporativo se houver, senão pessoal.
+      .update({ name: newName, job_title: newFuncao, celular_corporativo: newCorp, celular_pessoal: newPess })
       .eq('id', editNameUser.id)
 
     if (error) {
@@ -210,7 +448,7 @@ export default function Admin({ onBack }) {
     }
 
     setUsers(prev => prev.map(p => p.id === editNameUser.id
-      ? { ...p, name: newName, job_title: newFuncao, celular: newCelular }
+      ? { ...p, name: newName, job_title: newFuncao, celular_corporativo: newCorp, celular_pessoal: newPess, celular: newCorp || newPess }
       : p))
     // ActivityLog renderiza cada valor de `details` como string (`${k}: ${v}`)
     // — objetos aninhados tipo { de, para } viram "[object Object]" na tela,
@@ -218,7 +456,8 @@ export default function Admin({ onBack }) {
     const changes = {}
     if (newName !== oldName) changes.nome = `${oldName || '—'} → ${newName}`
     if (newFuncao !== oldFuncao) changes.funcao = `${oldFuncao || '—'} → ${newFuncao || '—'}`
-    if (newCelular !== oldCelular) changes.celular = `${oldCelular || '—'} → ${newCelular || '—'}`
+    if (newCorp !== oldCorp) changes.celular_corporativo = `${oldCorp || '—'} → ${newCorp || '—'}`
+    if (newPess !== oldPess) changes.celular_pessoal = `${oldPess || '—'} → ${newPess || '—'}`
     logActivity({
       action: 'edit_profile',
       target: editNameUser.email,
@@ -232,11 +471,25 @@ export default function Admin({ onBack }) {
     }, 1000)
   }
 
-  async function openPerms(u) {
+  async function openPerms(u, focus = null) {
+    setFocusSystem(focus)
     setPermUser(u)
     setPermLevel(u.level || 'Colaborador')
     setPermDept(u.department || '')
     setPermIsLead(Boolean(u.is_department_lead))
+    setPermPower(u.power_level || '')
+    setPermValues(u.values_access || 'nenhum')
+    setOpenSystems(new Set(focus ? [focus] : [])); setOpenModules(new Set())
+    const [{ data: grants }, { data: valex }] = await Promise.all([
+      supabase.from('user_grants').select('system_slug, module_key, action_key').eq('user_id', u.id),
+      supabase.from('user_value_exceptions').select('system_slug, module_key, tag_key, allow').eq('user_id', u.id),
+    ])
+    const g = new Set((grants || []).map(r => `${r.system_slug}|${r.module_key}|${r.action_key}`))
+    const v = new Map((valex || []).map(r => [`${r.system_slug}|${r.module_key}|${r.tag_key}`, r.allow]))
+    setPermGrants(g); setOrigGrants(new Set(g))
+    setPermValEx(v); setOrigValEx(new Map(v))
+    setNewSub(emptySub); setSubMsg(null)
+    loadSubsts(u.id)
     setPermMsg(null)
     setPermLoading(true)
 
@@ -274,57 +527,111 @@ export default function Admin({ onBack }) {
     setPermSaving(true)
     setPermMsg(null)
 
-    // 1. Atualiza nível, departamento e liderança (department/is_department_lead
-    //    disparam o trigger auto_assign_manager_id no banco, que recalcula
-    //    sozinho a posição desta pessoa no organograma do GenteGestão)
-    const { error: levelErr } = await supabase
-      .from('profiles')
-      .update({ level: permLevel, department: permDept || null, is_department_lead: permIsLead })
-      .eq('id', permUser.id)
+    const canGrant = canGrantTo(permUser)
+    const canDept  = canEditDeptOf(permUser)
 
-    if (levelErr) {
-      setPermMsg({ type: 'error', text: 'Erro ao salvar cargo.' })
-      setPermSaving(false)
-      return
+    // 1. Atualiza só o que esta pessoa tem alçada para mudar (o banco confere
+    //    de novo e recusa o resto). department/is_department_lead disparam o
+    //    trigger auto_assign_manager_id, que recalcula o organograma.
+    const changes = {}
+    if (canGrant) {
+      changes.level              = permLevel
+      changes.is_department_lead = permIsLead
+      changes.values_access      = permValues
     }
+    if (canDept) changes.department = permDept || null
+    if (myPower === 'plenos') changes.power_level = permPower || null
 
-    // 2. Sincroniza module_permissions — que agora guarda só BLOQUEIOS.
-    // Apaga o que existir do usuário e regrava apenas os sistemas desmarcados.
-    await supabase
-      .from('module_permissions')
-      .delete()
-      .eq('user_id', permUser.id)
+    if (Object.keys(changes).length > 0) {
+      const { error: levelErr } = await supabase
+        .from('profiles')
+        .update(changes)
+        .eq('id', permUser.id)
 
-    const blockedSlugs = permFull
-      ? []
-      : modules.map(m => m.slug).filter(s => !permSlugs.includes(s))
-
-    if (blockedSlugs.length > 0) {
-      const rows = blockedSlugs.map(slug => ({
-        user_id: permUser.id,
-        module_slug: slug,
-        can_access: false,
-      }))
-      const { error: insertErr } = await supabase
-        .from('module_permissions')
-        .insert(rows)
-
-      if (insertErr) {
-        setPermMsg({ type: 'error', text: 'Erro ao salvar permissões de módulos.' })
+      if (levelErr) {
+        setPermMsg({ type: 'error', text: levelErr.message || 'Erro ao salvar cargo.' })
         setPermSaving(false)
         return
       }
     }
 
+    // 2. Sincroniza module_permissions — que guarda só BLOQUEIOS. Acesso a
+    //    sistemas é poder: só regrava se tiver alçada sobre esta pessoa.
+    const blockedSlugs = permFull
+      ? []
+      : modules.map(m => m.slug).filter(s => !permSlugs.includes(s))
+
+    if (canGrant) {
+      const { error: delErr } = await supabase
+        .from('module_permissions')
+        .delete()
+        .eq('user_id', permUser.id)
+
+      if (delErr) {
+        setPermMsg({ type: 'error', text: delErr.message || 'Erro ao salvar permissões de módulos.' })
+        setPermSaving(false)
+        return
+      }
+
+      if (blockedSlugs.length > 0) {
+        const rows = blockedSlugs.map(slug => ({
+          user_id: permUser.id,
+          module_slug: slug,
+          can_access: false,
+        }))
+        const { error: insertErr } = await supabase
+          .from('module_permissions')
+          .insert(rows)
+
+        if (insertErr) {
+          setPermMsg({ type: 'error', text: insertErr.message || 'Erro ao salvar permissões de módulos.' })
+          setPermSaving(false)
+          return
+        }
+      }
+    }
+
+    // 3. Árvore de alçadas: grava só o que mudou (o banco confere a alçada de novo)
+    if (canGrant) {
+      const split = k => { const [system_slug, module_key, key] = k.split('|'); return { system_slug, module_key, key } }
+      const added   = [...permGrants].filter(k => !origGrants.has(k))
+      const removed = [...origGrants].filter(k => !permGrants.has(k))
+      if (removed.length) {
+        const byMod = {}
+        removed.forEach(k => { const r = split(k); (byMod[`${r.system_slug}|${r.module_key}`] ||= []).push(r.key) })
+        for (const [sm, keys] of Object.entries(byMod)) {
+          const [system_slug, module_key] = sm.split('|')
+          const { error } = await supabase.from('user_grants').delete()
+            .eq('user_id', permUser.id).eq('system_slug', system_slug).eq('module_key', module_key).in('action_key', keys)
+          if (error) { setPermMsg({ type: 'error', text: error.message }); setPermSaving(false); return }
+        }
+      }
+      if (added.length) {
+        const rows = added.map(k => { const r = split(k); return { user_id: permUser.id, system_slug: r.system_slug, module_key: r.module_key, action_key: r.key, granted_by: myId } })
+        const { error } = await supabase.from('user_grants').insert(rows)
+        if (error) { setPermMsg({ type: 'error', text: error.message }); setPermSaving(false); return }
+      }
+      const vRemoved = [...origValEx.keys()].filter(k => !permValEx.has(k))
+      for (const k of vRemoved) {
+        const r = split(k)
+        await supabase.from('user_value_exceptions').delete()
+          .eq('user_id', permUser.id).eq('system_slug', r.system_slug).eq('module_key', r.module_key).eq('tag_key', r.key)
+      }
+      const vChanged = [...permValEx.entries()].filter(([k, allow]) => origValEx.get(k) !== allow)
+      if (vChanged.length) {
+        const rows = vChanged.map(([k, allow]) => { const r = split(k); return { user_id: permUser.id, system_slug: r.system_slug, module_key: r.module_key, tag_key: r.key, allow, granted_by: myId } })
+        const { error } = await supabase.from('user_value_exceptions').upsert(rows)
+        if (error) { setPermMsg({ type: 'error', text: error.message }); setPermSaving(false); return }
+      }
+    }
+
     // Atualiza lista local de usuários com nível, departamento e liderança
     setUsers(prev => prev.map(p =>
-      p.id === permUser.id
-        ? { ...p, level: permLevel, department: permDept || null, is_department_lead: permIsLead }
-        : p
+      p.id === permUser.id ? { ...p, ...changes } : p
     ))
 
     // Atualiza o mapa local de bloqueios para refletir na tabela imediatamente
-    setBlocksMap(prev => {
+    if (canGrant) setBlocksMap(prev => {
       const next = { ...prev }
       if (blockedSlugs.length === 0) delete next[permUser.id]
       else next[permUser.id] = blockedSlugs
@@ -338,7 +645,11 @@ export default function Admin({ onBack }) {
         nivel: permLevel,
         departamento: permDept || '(nenhum)',
         lider_departamento: permIsLead,
-        acesso: blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
+        poder: POWER_LABEL[permPower] || 'nenhum',
+        alcadas: `${permGrants.size} (+${[...permGrants].filter(k => !origGrants.has(k)).length} / -${[...origGrants].filter(k => !permGrants.has(k)).length})`,
+        valores: permValues === 'todos' ? 'vê todos' : 'não vê',
+        acesso: !canGrant ? '(sem alteração)'
+          : blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
       },
     })
     setPermMsg({ type: 'success', text: 'Permissões salvas com sucesso!' })
@@ -729,7 +1040,8 @@ export default function Admin({ onBack }) {
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Colaborador</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden sm:table-cell">Nível</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Função</th>
-                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular</th>
+                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular corp.</th>
+                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular pessoal</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4">Status</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden lg:table-cell">Acessos</th>
                     <th className="text-right text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Ações</th>
@@ -841,6 +1153,18 @@ export default function Admin({ onBack }) {
                             'bg-slate-500/20 text-slate-400'}`}>
                           {u.level || 'Colaborador'}
                         </span>
+                        {u.power_level && (
+                          <span title="Nível de poder no vpsistema"
+                                className="ml-1.5 inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300">
+                            <KeyRound className="w-3 h-3" />{POWER_LABEL[u.power_level]}
+                          </span>
+                        )}
+                        {u.values_access === 'todos' && (
+                          <span title="Vê todos os valores R$"
+                                className="ml-1.5 inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
+                            <LockOpen className="w-3 h-3" />R$
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-4 hidden md:table-cell">
                         {u.job_title
@@ -848,8 +1172,15 @@ export default function Admin({ onBack }) {
                           : <span className="text-slate-600 text-xs italic">—</span>}
                       </td>
                       <td className="px-4 py-4 hidden md:table-cell">
-                        {u.celular
-                          ? <span className="text-slate-300 text-xs whitespace-nowrap">{formatCelular(u.celular)}</span>
+                        {u.celular_corporativo
+                          ? <span className="text-slate-300 text-xs whitespace-nowrap" title="Recebe as mensagens">{formatCelular(u.celular_corporativo)}</span>
+                          : <span className="text-slate-600 text-xs italic">—</span>}
+                      </td>
+                      <td className="px-4 py-4 hidden md:table-cell">
+                        {u.celular_pessoal
+                          ? <span className="text-slate-300 text-xs whitespace-nowrap" title={u.celular_corporativo ? 'Não recebe mensagens (há corporativo)' : 'Recebe as mensagens'}>
+                              {formatCelular(u.celular_pessoal)}
+                            </span>
                           : <span className="text-slate-600 text-xs italic">—</span>}
                       </td>
                       <td className="px-4 py-4">
@@ -876,31 +1207,28 @@ export default function Admin({ onBack }) {
                             return <span className="text-xs text-slate-600 italic">Sem acesso definido</span>
                           }
 
-                          const visibleMods = modules.filter(m => !blockedSlugs.includes(m.slug))
-
-                          if (visibleMods.length === 0) {
-                            return (
-                              <span className="text-xs text-slate-600 italic">Sem acesso</span>
-                            )
-                          }
+                          const clickable = canGrantTo(u)
                           return (
                             <div className="flex items-center gap-1 flex-wrap">
-                              {visibleMods.map(mod => {
+                              {modules.map(mod => {
                                 const ModIcon = getModuleIcon(mod.icon)
                                 const color   = mod.color || '#F59E0B'
+                                const has     = !blockedSlugs.includes(mod.slug)
+                                const label   = `${mod.name}${has ? '' : ' — sem acesso'}${u.is_placeholder ? ' (sem login ainda)' : ''}${clickable ? ' · clique para ajustar' : ''}`
                                 return (
-                                  <div
+                                  <button
+                                    type="button"
                                     key={mod.slug}
-                                    title={u.is_placeholder ? `${mod.name} (pendente — sem login ainda)` : mod.name}
-                                    className={`w-6 h-6 rounded-md flex items-center justify-center ${u.is_placeholder ? 'opacity-50' : ''}`}
-                                    style={{ background: `${color}20` }}
+                                    title={label}
+                                    disabled={!clickable}
+                                    onClick={() => openPerms(u, mod.slug)}
+                                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-all
+                                      ${has ? '' : 'grayscale opacity-25'} ${u.is_placeholder ? 'opacity-50' : ''}
+                                      ${clickable ? 'cursor-pointer hover:ring-1 hover:ring-white/40 hover:opacity-100 hover:grayscale-0' : 'cursor-default'}`}
+                                    style={{ background: has ? `${color}20` : 'rgba(255,255,255,0.04)' }}
                                   >
-                                    <ModIcon
-                                      className="w-3.5 h-3.5"
-                                      strokeWidth={1.75}
-                                      style={{ color }}
-                                    />
-                                  </div>
+                                    <ModIcon className="w-3.5 h-3.5" strokeWidth={1.75} style={{ color: has ? color : '#64748b' }} />
+                                  </button>
                                 )
                               })}
                             </div>
@@ -953,11 +1281,13 @@ export default function Admin({ onBack }) {
       {/* ── Modal: Permissões ── */}
       {permUser && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
-          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-lg shadow-2xl max-h-full overflow-y-auto">
+          <div className="bg-surface-card border border-surface-border rounded-2xl p-8 w-full max-w-3xl shadow-2xl max-h-full overflow-y-auto">
 
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-white font-bold text-lg">Cargo e Acessos</h2>
+                <h2 className="text-white font-bold text-lg">
+                  {focusSystem ? `Acesso — ${modules.find(m => m.slug === focusSystem)?.name || focusSystem}` : 'Cargo e Acessos'}
+                </h2>
                 <p className="text-slate-500 text-sm mt-0.5">{permUser.name}</p>
               </div>
               <button onClick={() => setPermUser(null)}
@@ -973,6 +1303,95 @@ export default function Admin({ onBack }) {
             ) : (
               <div className="space-y-6">
 
+                {/* Por que não pode alterar (a regra vale no banco; aqui só explicamos) */}
+                {grantBlockReason(permUser) && (
+                  <div className="flex items-start gap-2 rounded-lg px-4 py-3 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                    <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{grantBlockReason(permUser)}</span>
+                  </div>
+                )}
+
+                {!focusSystem && (<>
+                {/* 🔑 Nível de poder — topo da árvore; só quem tem Plenos altera */}
+                <div>
+                  <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <KeyRound className="w-3.5 h-3.5 text-brand" />
+                    Nível de poder no vpsistema
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {POWER_LEVELS.map(opt => {
+                      const selected = permPower === opt.value
+                      return (
+                        <label
+                          key={opt.value || 'nenhum'}
+                          title={opt.hint}
+                          className={`flex flex-col gap-0.5 p-3 rounded-lg border transition-colors
+                            ${myPower === 'plenos' ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}
+                            ${selected ? 'border-brand/60 bg-brand/10' : 'border-surface-border'}`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="perm-power"
+                              checked={selected}
+                              disabled={myPower !== 'plenos'}
+                              onChange={() => setPermPower(opt.value)}
+                              className="accent-amber-400"
+                            />
+                            <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-slate-400'}`}>{opt.label}</span>
+                          </span>
+                          <span className="text-slate-500 text-[11px] leading-snug">{opt.hint}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  {myPower !== 'plenos' && (
+                    <p className="text-slate-500 text-xs mt-2">Só quem tem poderes plenos altera o nível de poder.</p>
+                  )}
+                </div>
+
+                {/* ⭐ Valores R$ — vale no ecossistema inteiro */}
+                <div>
+                  <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span className="text-brand">R$</span>
+                    Valores financeiros (todos os sistemas)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'nenhum', label: 'Não vê valores', hint: 'Os R$ aparecem desfocados.', Icon: Lock },
+                      { value: 'todos',  label: 'Vê todos',       hint: 'Enxerga todos os valores.',  Icon: LockOpen },
+                    ].map(opt => {
+                      const selected = permValues === opt.value
+                      const enabled  = canGrantTo(permUser)
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`flex flex-col gap-0.5 p-3 rounded-lg border transition-colors
+                            ${enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}
+                            ${selected ? 'border-brand/60 bg-brand/10' : 'border-surface-border'}`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="perm-values"
+                              checked={selected}
+                              disabled={!enabled}
+                              onChange={() => { if (opt.value !== permValues) setPermValEx(new Map()); setPermValues(opt.value) }}
+                              className="accent-amber-400"
+                            />
+                            <opt.Icon className={`w-3.5 h-3.5 ${selected ? 'text-brand' : 'text-slate-500'}`} />
+                            <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-slate-400'}`}>{opt.label}</span>
+                          </span>
+                          <span className="text-slate-500 text-[11px] leading-snug">{opt.hint}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p className="text-slate-500 text-xs mt-2">
+                    Exceções por valor (ex.: só "valores da P.I.") ficam dentro de cada sistema, em ▸ Alçadas.
+                  </p>
+                </div>
+
                 {/* Cargo */}
                 <div>
                   <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
@@ -981,8 +1400,9 @@ export default function Admin({ onBack }) {
                   <select
                     value={permLevel}
                     onChange={e => setPermLevel(e.target.value)}
+                    disabled={!canGrantTo(permUser)}
                     className="w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-3 py-3 text-sm
-                               focus:outline-none focus:border-brand transition-colors"
+                               focus:outline-none focus:border-brand transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
@@ -996,8 +1416,9 @@ export default function Admin({ onBack }) {
                   <select
                     value={permDept}
                     onChange={e => setPermDept(e.target.value)}
+                    disabled={!canEditDeptOf(permUser)}
                     className="w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-3 py-3 text-sm
-                               focus:outline-none focus:border-brand transition-colors"
+                               focus:outline-none focus:border-brand transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     <option value="">Selecionar</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1009,6 +1430,7 @@ export default function Admin({ onBack }) {
                   <input
                     type="checkbox"
                     checked={permIsLead}
+                    disabled={!canGrantTo(permUser)}
                     onChange={e => setPermIsLead(e.target.checked)}
                     className="w-4 h-4 accent-amber-400 cursor-pointer"
                   />
@@ -1018,21 +1440,26 @@ export default function Admin({ onBack }) {
                   </div>
                 </label>
 
+                </>)}
+
                 {/* Acesso aos sistemas */}
                 <div>
-                  <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
-                    Acesso aos Sistemas
+                  <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
+                    <Puzzle className="w-3.5 h-3.5 text-brand" />
+                    Sistemas
                   </label>
                   <p className="text-slate-500 text-xs mb-3 leading-relaxed">
-                    Todo colaborador cadastrado entra em todos os sistemas por padrão.
-                    Desmarque apenas o que este colaborador <strong className="text-slate-400">não</strong> deve acessar.
+                    Desmarque o que este colaborador <strong className="text-slate-400">não</strong> deve acessar.
+                    Em ▸ Alçadas você define o que ele pode fazer dentro de cada sistema. Sistemas novos chegam fechados.
                   </p>
 
+                  {!focusSystem && (<>
                   {/* Toggle acesso total */}
                   <label className="flex items-center gap-3 p-3 rounded-lg border border-brand/40 bg-brand/5 cursor-pointer mb-3">
                     <input
                       type="checkbox"
                       checked={permFull}
+                      disabled={!canGrantTo(permUser)}
                       onChange={e => toggleFullAccess(e.target.checked)}
                       className="w-4 h-4 accent-amber-400 cursor-pointer"
                     />
@@ -1042,54 +1469,147 @@ export default function Admin({ onBack }) {
                     </div>
                   </label>
 
-                  {/* Lista de módulos individuais */}
-                  {!permFull && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {modules.map(mod => {
-                        const checked  = permSlugs.includes(mod.slug)
-                        const modColor = mod.color || '#F59E0B'
-                        const ModIcon  = getModuleIcon(mod.icon)
-                        return (
-                          <label
-                            key={mod.slug}
-                            className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all duration-150"
-                            style={checked ? {
-                              borderColor: `${modColor}60`,
-                              background:  `${modColor}12`,
-                            } : {
-                              borderColor: 'rgba(255,255,255,0.07)',
-                            }}
-                          >
+                  </>)}
+
+                  {/* Sistemas — cada um com a sua árvore de alçadas (clique em ▸ Alçadas) */}
+                  <div className="space-y-2">
+                    {modules.filter(m => !focusSystem || m.slug === focusSystem).map(mod => {
+                      const checked  = permFull || permSlugs.includes(mod.slug)
+                      const modColor = mod.color || '#F59E0B'
+                      const ModIcon  = getModuleIcon(mod.icon)
+                      const hasTree  = catalogSystems.has(mod.slug)
+                      const isOpen   = openSystems.has(mod.slug)
+                      const editable = canGrantTo(permUser)
+                      return (
+                        <div key={mod.slug} className="rounded-lg border transition-all"
+                             style={checked ? { borderColor: `${modColor}60`, background: `${modColor}0d` } : { borderColor: 'rgba(255,255,255,0.07)' }}>
+                          <div className="flex items-center gap-3 p-3">
                             <input
                               type="checkbox"
                               checked={checked}
-                              onChange={() => toggleSlug(mod.slug)}
+                              disabled={!editable}
+                              onChange={() => {
+                                if (permFull) { setPermFull(false); setPermSlugs(modules.map(m => m.slug).filter(s => s !== mod.slug)) }
+                                else toggleSlug(mod.slug)
+                              }}
                               className="w-4 h-4 cursor-pointer shrink-0"
                               style={{ accentColor: modColor }}
                             />
-                            {/* Ícone do módulo */}
-                            <div
-                              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all"
-                              style={{
-                                background: checked ? `${modColor}25` : 'rgba(255,255,255,0.05)',
-                              }}
-                            >
-                              <ModIcon
-                                className="w-4 h-4"
-                                strokeWidth={1.75}
-                                style={{ color: checked ? modColor : '#64748b' }}
-                              />
+                            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                                 style={{ background: checked ? `${modColor}25` : 'rgba(255,255,255,0.05)' }}>
+                              <ModIcon className="w-4 h-4" strokeWidth={1.75} style={{ color: checked ? modColor : '#64748b' }} />
                             </div>
-                            <span
-                              className="text-sm font-medium transition-colors"
-                              style={{ color: checked ? '#e2e8f0' : '#64748b' }}
-                            >
-                              {mod.name}
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
+                            <span className="text-sm font-medium flex-1" style={{ color: checked ? '#e2e8f0' : '#64748b' }}>{mod.name}</span>
+                            {hasTree && checked && (
+                              <button type="button" onClick={() => toggleOpen(setOpenSystems, mod.slug)}
+                                      className="flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md border border-surface-border text-slate-300 hover:text-white hover:border-slate-500">
+                                {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                                Alçadas
+                                <span className="ml-1 text-slate-500">({grantCount(mod.slug)})</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {hasTree && checked && isOpen && (
+                            <div className="border-t border-surface-border px-3 pb-3 pt-2 space-y-3">
+                              {treeFor(mod.slug).map(group => {
+                                const total = group.modules.reduce((n, m) => n + m.actions.filter(a => !a.choice_group).length, 0)
+                                const marked = group.modules.reduce((n, m) => n + grantCount(mod.slug, m.module_key), 0)
+                                return (
+                                  <div key={group.label}>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{group.label}</span>
+                                      {editable && total > 0 && (
+                                        <button type="button" onClick={() => setGroupAll(mod.slug, group, marked < total)}
+                                                className="text-[11px] text-brand hover:underline">
+                                          {marked < total ? 'Marcar grupo inteiro' : 'Desmarcar grupo'}
+                                        </button>
+                                      )}
+                                    </div>
+                                    <div className="space-y-1">
+                                      {group.modules.map(m => {
+                                        const mk = `${mod.slug}|${m.module_key}`
+                                        const mOpen = openModules.has(mk)
+                                        const n = grantCount(mod.slug, m.module_key)
+                                        const choiceGroups = [...new Set(m.actions.filter(a => a.choice_group).map(a => a.choice_group))]
+                                        return (
+                                          <div key={m.module_key} className="rounded-md border border-surface-border">
+                                            <button type="button" onClick={() => toggleOpen(setOpenModules, mk)}
+                                                    className="w-full flex items-center gap-2 px-3 py-2 text-left">
+                                              {mOpen ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+                                              <span className={`text-sm flex-1 ${n ? 'text-white' : 'text-slate-400'}`}>{m.label}</span>
+                                              {m.tags.length > 0 && <span className="text-[10px] text-emerald-400 font-semibold">R$</span>}
+                                              <span className="text-[11px] text-slate-500">{n}/{m.actions.filter(a => !a.choice_group).length + choiceGroups.length}</span>
+                                            </button>
+                                            {mOpen && (
+                                              <div className="px-3 pb-3 space-y-2">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                                                  {m.actions.filter(a => !a.choice_group).map(a => (
+                                                    <label key={a.action_key} className={`flex items-start gap-2 text-xs ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+                                                      <input type="checkbox" className="mt-0.5 accent-amber-400" disabled={!editable}
+                                                             checked={permGrants.has(gkey(mod.slug, m.module_key, a.action_key))}
+                                                             onChange={() => toggleGrant(mod.slug, m.module_key, a.action_key, null, m.actions)} />
+                                                      <span className="text-slate-300">{a.label}</span>
+                                                    </label>
+                                                  ))}
+                                                </div>
+                                                {choiceGroups.map(cg => (
+                                                  <div key={cg} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                                                    {[{ action_key: '', label: 'Nenhum' }, ...m.actions.filter(a => a.choice_group === cg)].map(a => {
+                                                      const sel = a.action_key
+                                                        ? permGrants.has(gkey(mod.slug, m.module_key, a.action_key))
+                                                        : !m.actions.some(x => x.choice_group === cg && permGrants.has(gkey(mod.slug, m.module_key, x.action_key)))
+                                                      return (
+                                                        <label key={a.action_key || 'nenhum'} className={`flex items-center gap-2 text-xs ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+                                                          <input type="radio" name={`${mk}|${cg}`} className="accent-amber-400" disabled={!editable} checked={sel}
+                                                                 onChange={() => {
+                                                                   if (!a.action_key) setPermGrants(prev => { const nx = new Set(prev); m.actions.filter(x => x.choice_group === cg).forEach(x => nx.delete(gkey(mod.slug, m.module_key, x.action_key))); return nx })
+                                                                   else toggleGrant(mod.slug, m.module_key, a.action_key, cg, m.actions)
+                                                                 }} />
+                                                          <span className="text-slate-300">{a.label}</span>
+                                                        </label>
+                                                      )
+                                                    })}
+                                                  </div>
+                                                ))}
+                                                {m.tags.length > 0 && (
+                                                  <div className="pt-2 border-t border-surface-border">
+                                                    <p className="text-[11px] text-emerald-400 font-semibold mb-1">
+                                                      R$ {permValues === 'todos' ? 'Esconder só estes valores' : 'Liberar ver só estes valores'}
+                                                    </p>
+                                                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                                      {m.tags.map(t => (
+                                                        <label key={t.tag_key} className={`flex items-center gap-2 text-xs ${editable ? 'cursor-pointer' : 'opacity-60'}`}>
+                                                          <input type="checkbox" className="accent-emerald-400" disabled={!editable}
+                                                                 checked={permValEx.has(gkey(mod.slug, m.module_key, t.tag_key))}
+                                                                 onChange={() => toggleValueEx(mod.slug, m.module_key, t.tag_key)} />
+                                                          <span className="text-slate-300">{t.label}</span>
+                                                        </label>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {focusSystem && (
+                    <button type="button" onClick={() => { setFocusSystem(null) }}
+                            className="mt-3 text-xs text-brand hover:underline">
+                      Ver todos os acessos desta pessoa (poder, valores, cargo, outros sistemas)
+                    </button>
                   )}
 
                   {!permFull && permSlugs.length === 0 && (
@@ -1098,6 +1618,101 @@ export default function Admin({ onBack }) {
                     </p>
                   )}
                 </div>
+
+                {/* 🔁 Substituição temporária (férias) — só quem tem poder */}
+                {!focusSystem && (myPower === 'plenos' || myPower === 'medios') && substSystems.length > 0 && (
+                  <div>
+                    <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                      <Repeat className="w-3.5 h-3.5 text-brand" />
+                      Substituição temporária (férias)
+                    </label>
+                    <p className="text-slate-500 text-xs mb-3">
+                      Passa a ciência ou o nível de aprovação de {permUser.name?.split(' ')[0] || 'esta pessoa'} para outra pessoa por um período — nada fica parado.
+                      Aprovação financeira: só poderes plenos.
+                    </p>
+
+                    {substs.length > 0 && (
+                      <div className="space-y-1.5 mb-3">
+                        {substs.map(sb => (
+                          <div key={sb.id} className="flex items-center justify-between gap-3 rounded-md border border-surface-border px-3 py-2 text-xs">
+                            <span className="text-slate-300">
+                              <strong className="text-white">{sb.tipo === 'ciencia' ? 'Ciência' : 'Aprovação financeira'}</strong>
+                              {' → '}{users.find(x => x.id === sb.substituto_id)?.name || '—'}
+                              <span className="text-slate-500"> · {sb.inicio.split('-').reverse().join('/')} a {sb.fim.split('-').reverse().join('/')}</span>
+                              {!sb.titular_mantem && <span className="text-amber-400"> · titular fora</span>}
+                              {sb.tipo === 'aprovacao' && !sb.herda_nivel && <span className="text-amber-400"> · sem herdar nível</span>}
+                              {sb.motivo && <span className="text-slate-500 italic"> · {sb.motivo}</span>}
+                            </span>
+                            {(sb.tipo === 'ciencia' || myPower === 'plenos') && (
+                              <button type="button" onClick={() => cancelSubst(sb)} className="text-red-400 hover:underline shrink-0">Cancelar</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="rounded-lg border border-surface-border p-3 space-y-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <select value={newSub.system_slug} onChange={e => setNewSub({ ...newSub, system_slug: e.target.value })}
+                                className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-2 text-xs">
+                          <option value="">Sistema…</option>
+                          {substSystems.map(sl => <option key={sl} value={sl}>{modules.find(m => m.slug === sl)?.name || sl}</option>)}
+                        </select>
+                        <select value={newSub.substituto_id} onChange={e => setNewSub({ ...newSub, substituto_id: e.target.value })}
+                                className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-2 text-xs">
+                          <option value="">Quem assume…</option>
+                          {users.filter(x => x.is_active && x.id !== permUser.id && !x.is_placeholder).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 text-xs">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="radio" name="sub-tipo" className="accent-amber-400" checked={newSub.tipo === 'ciencia'}
+                                 onChange={() => setNewSub({ ...newSub, tipo: 'ciencia' })} />
+                          <span className="text-slate-300">Ciência</span>
+                        </label>
+                        <label className={`flex items-center gap-2 ${myPower === 'plenos' ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                               title={myPower === 'plenos' ? '' : 'Só poderes plenos'}>
+                          <input type="radio" name="sub-tipo" className="accent-amber-400" disabled={myPower !== 'plenos'} checked={newSub.tipo === 'aprovacao'}
+                                 onChange={() => setNewSub({ ...newSub, tipo: 'aprovacao' })} />
+                          <span className="text-slate-300">Aprovação financeira (nível)</span>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <label className="text-[11px] text-slate-500">Início
+                          <input type="date" value={newSub.inicio} onChange={e => setNewSub({ ...newSub, inicio: e.target.value })}
+                                 className="mt-0.5 w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-[11px] text-slate-500">Fim
+                          <input type="date" value={newSub.fim} onChange={e => setNewSub({ ...newSub, fim: e.target.value })}
+                                 className="mt-0.5 w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs" />
+                        </label>
+                        <label className="text-[11px] text-slate-500 col-span-2 sm:col-span-1">Motivo
+                          <input value={newSub.motivo} onChange={e => setNewSub({ ...newSub, motivo: e.target.value })} placeholder="Ex.: férias"
+                                 className="mt-0.5 w-full bg-surface border border-surface-border text-white placeholder-slate-600 rounded-lg px-2 py-1.5 text-xs" />
+                        </label>
+                      </div>
+                      <div className="flex flex-wrap gap-4 text-xs">
+                        <label className={`flex items-center gap-2 ${myPower === 'plenos' ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+                          <input type="checkbox" className="accent-amber-400" disabled={myPower !== 'plenos'} checked={newSub.titular_mantem}
+                                 onChange={e => setNewSub({ ...newSub, titular_mantem: e.target.checked })} />
+                          <span className="text-slate-300">Titular continua podendo agir</span>
+                        </label>
+                        {newSub.tipo === 'aprovacao' && (
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" className="accent-amber-400" checked={newSub.herda_nivel}
+                                   onChange={e => setNewSub({ ...newSub, herda_nivel: e.target.checked })} />
+                            <span className="text-slate-300">Quem assume herda o nível do titular</span>
+                          </label>
+                        )}
+                      </div>
+                      {subMsg && <p className={`text-xs ${subMsg.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>{subMsg.text}</p>}
+                      <button type="button" onClick={addSubst}
+                              className="text-xs font-semibold px-3 py-1.5 rounded-md border border-brand/40 text-brand hover:bg-brand/10">
+                        + Adicionar substituição
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Feedback */}
                 {permMsg && (
@@ -1114,7 +1729,7 @@ export default function Admin({ onBack }) {
 
                 <button
                   onClick={savePerms}
-                  disabled={permSaving}
+                  disabled={permSaving || (!canEditDeptOf(permUser) && myPower !== 'plenos')}
                   className="w-full bg-brand hover:bg-brand-dark disabled:opacity-60 text-surface
                              font-bold rounded-lg py-3 text-sm flex items-center justify-center gap-2
                              transition-colors"
@@ -1161,7 +1776,22 @@ export default function Admin({ onBack }) {
                   className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
                              rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
                 />
-                <p className="text-slate-500 text-xs mt-1">{editNameUser.email}</p>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 uppercase tracking-wider">E-mail (login)</label>
+                <input
+                  type="email"
+                  value={editEmailValue}
+                  onChange={e => setEditEmailValue(e.target.value)}
+                  placeholder="nome@verticalparts.com.br"
+                  disabled={!canEditDeptOf(editNameUser)}
+                  className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors disabled:opacity-60"
+                />
+                <p className="text-slate-500 text-xs mt-1">
+                  Trocar aqui muda o login da pessoa e atualiza os sistemas ligados (VPRequisições, Pós-Venda, Propostas, Visitas, Catraca).
+                </p>
               </div>
 
               <div>
@@ -1176,16 +1806,32 @@ export default function Admin({ onBack }) {
                 />
               </div>
 
-              <div>
-                <label className="text-xs text-slate-500 uppercase tracking-wider">Celular</label>
-                <input
-                  type="tel"
-                  value={editCelularValue}
-                  onChange={e => setEditCelularValue(e.target.value)}
-                  placeholder="Ex: 11999999999"
-                  className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
-                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-500 uppercase tracking-wider">Celular corporativo</label>
+                  <input
+                    type="tel"
+                    value={editCorpValue}
+                    onChange={e => setEditCorpValue(e.target.value)}
+                    placeholder="Ex: 11999999999"
+                    className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                               rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 uppercase tracking-wider">Celular pessoal</label>
+                  <input
+                    type="tel"
+                    value={editPessValue}
+                    onChange={e => setEditPessValue(e.target.value)}
+                    placeholder="Ex: 11999999999"
+                    className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                               rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                  />
+                </div>
+                <p className="sm:col-span-2 text-slate-500 text-xs -mt-1">
+                  Mensagens vão para o <strong className="text-slate-400">corporativo</strong>; o pessoal só recebe se não houver corporativo.
+                </p>
               </div>
 
               {editNameMsg && (
@@ -1223,41 +1869,144 @@ export default function Admin({ onBack }) {
         </div>
       )}
 
-      {/* ── Modal: Confirmar Inativação ── */}
+      {/* ── Modal: Inativar (motivo + devoluções) / Reativar (mini-relatório) ── */}
       {toggleUser && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 px-4">
-          <div className="bg-surface-card border border-yellow-600/40 rounded-2xl p-8 w-full max-w-sm shadow-2xl">
-            <div className="flex flex-col items-center text-center gap-4">
-              <div className="w-14 h-14 rounded-full bg-yellow-500/15 flex items-center justify-center">
-                <AlertCircle className="w-7 h-7 text-yellow-500" />
-              </div>
-              <div>
-                <h2 className="text-white font-bold text-lg">Inativar colaborador?</h2>
-                <p className="text-slate-400 text-sm mt-1">
-                  <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> perde
-                  o acesso ao portal e a <span className="text-yellow-400 font-semibold">todos os sistemas VP</span> imediatamente.
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 px-4 py-8">
+          <div className="bg-surface-card border border-yellow-600/40 rounded-2xl p-8 w-full max-w-md shadow-2xl max-h-full overflow-y-auto">
+            {toggleUser.is_active ? (
+              <div className="flex flex-col gap-5">
+                <div className="flex flex-col items-center text-center gap-3">
+                  <div className="w-14 h-14 rounded-full bg-yellow-500/15 flex items-center justify-center">
+                    <AlertCircle className="w-7 h-7 text-yellow-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-white font-bold text-lg">Inativar colaborador?</h2>
+                    <p className="text-slate-400 text-sm mt-1">
+                      <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> perde
+                      o acesso ao portal e a <span className="text-yellow-400 font-semibold">todos os sistemas VP</span> imediatamente.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 1ª pergunta: motivo */}
+                <div>
+                  <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Motivo</label>
+                  <div className="grid grid-cols-1 gap-2">
+                    {INACTIVATION_REASONS.map(opt => (
+                      <label key={opt.value}
+                             className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+                               ${inactReason === opt.value ? 'border-yellow-500/60 bg-yellow-500/10' : 'border-surface-border'}`}>
+                        <input type="radio" name="inact-reason" className="mt-1 accent-amber-400"
+                               checked={inactReason === opt.value} onChange={() => setInactReason(opt.value)} />
+                        <span>
+                          <span className="block text-white text-sm font-medium">{opt.label}</span>
+                          <span className="block text-slate-500 text-xs">{opt.hint}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Só na demissão: devolução de ativos */}
+                {inactReason === 'demissao' && (
+                  <div>
+                    <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Devolução de ativos</label>
+                    <div className="space-y-2">
+                      {RETURN_ITEMS.map(item => (
+                        <div key={item} className="flex items-center justify-between gap-3">
+                          <span className="text-slate-300 text-sm">{item}</span>
+                          <select value={inactReturns[item] || 'pendente'}
+                                  onChange={e => setInactReturns(prev => ({ ...prev, [item]: e.target.value }))}
+                                  className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-brand">
+                            {RETURN_STATUS.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-3">
+                        <input value={inactOther} onChange={e => setInactOther(e.target.value)}
+                               placeholder="Outro item (ex.: chave, uniforme)"
+                               className="flex-1 bg-surface border border-surface-border text-white placeholder-slate-600 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-brand" />
+                        <select value={inactReturns.__outro || 'pendente'} disabled={!inactOther.trim()}
+                                onChange={e => setInactReturns(prev => ({ ...prev, __outro: e.target.value }))}
+                                className="bg-surface border border-surface-border text-slate-300 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-brand disabled:opacity-50">
+                          {RETURN_STATUS.map(st => <option key={st.value} value={st.value}>{st.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {inactReason && (
+                  <div>
+                    <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">Observação (opcional)</label>
+                    <textarea value={inactNote} onChange={e => setInactNote(e.target.value)} rows={2}
+                              className="w-full bg-surface border border-surface-border text-white placeholder-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand"
+                              placeholder="Ex.: retorno previsto em 30 dias" />
+                  </div>
+                )}
+
+                <p className="text-slate-500 text-xs text-center">
+                  O cadastro não é apagado. Dá para reativar a qualquer momento por este mesmo botão.
                 </p>
-                <p className="text-slate-500 text-xs mt-2">
-                  O cadastro não é apagado — dá para reativar a qualquer momento por este mesmo botão.
-                </p>
+                <div className="flex gap-3 w-full">
+                  <button onClick={() => setToggleUser(null)}
+                          className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border text-slate-400 hover:text-white hover:border-slate-500 transition-colors">
+                    Cancelar
+                  </button>
+                  <button onClick={() => toggleActive(toggleUser)} disabled={!inactReason}
+                          className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    Inativar
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-3 w-full mt-2">
-                <button
-                  onClick={() => setToggleUser(null)}
-                  className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border
-                             text-slate-400 hover:text-white hover:border-slate-500 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => toggleActive(toggleUser)}
-                  className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg
-                             bg-yellow-600 hover:bg-yellow-700 text-white transition-colors"
-                >
-                  Inativar
-                </button>
+            ) : (
+              <div className="flex flex-col gap-5">
+                <div className="text-center">
+                  <h2 className="text-white font-bold text-lg">Reativar colaborador?</h2>
+                  <p className="text-slate-400 text-sm mt-1">
+                    <span className="text-white font-semibold">{toggleUser.name || toggleUser.email}</span> volta a ter acesso ao portal.
+                  </p>
+                </div>
+
+                {/* Mini-relatório da inativação */}
+                {lastInact ? (
+                  <div className="rounded-lg border border-surface-border p-4 text-sm space-y-2">
+                    <p className="text-slate-300 text-xs font-semibold uppercase tracking-wider">Última inativação</p>
+                    <p className="text-slate-400">
+                      <span className="text-white font-medium">{REASON_LABEL[lastInact.motivo]}</span>
+                      {' · '}{new Date(lastInact.inativado_em).toLocaleDateString('pt-BR')}
+                      {lastInact.inativado_por && <> · por {users.find(x => x.id === lastInact.inativado_por)?.name || '—'}</>}
+                    </p>
+                    {(lastInact.devolucoes || []).length > 0 && (
+                      <ul className="space-y-1">
+                        {lastInact.devolucoes.map(d => (
+                          <li key={d.item} className="flex justify-between text-xs">
+                            <span className="text-slate-400">{d.item}</span>
+                            <span className={d.status === 'pendente' ? 'text-red-400 font-medium' : 'text-slate-500'}>
+                              {RETURN_STATUS.find(st => st.value === d.status)?.label || d.status}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {lastInact.observacao && <p className="text-slate-500 text-xs italic">{lastInact.observacao}</p>}
+                  </div>
+                ) : (
+                  <p className="text-slate-500 text-xs text-center">Sem registro de motivo (inativado antes deste recurso).</p>
+                )}
+
+                <div className="flex gap-3 w-full">
+                  <button onClick={() => setToggleUser(null)}
+                          className="flex-1 text-sm font-medium px-4 py-2.5 rounded-lg border border-surface-border text-slate-400 hover:text-white hover:border-slate-500 transition-colors">
+                    Cancelar
+                  </button>
+                  <button onClick={() => toggleActive(toggleUser)}
+                          className="flex-1 text-sm font-bold px-4 py-2.5 rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors">
+                    Reativar
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}

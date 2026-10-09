@@ -20,8 +20,10 @@ function App() {
   const [user,       setUser]       = useState(null)
   const [loading,    setLoading]    = useState(true)
   const path = usePath() // '/' (login) | '/inicio' | '/administracao' | '/painel-executivo' | '/historico' | '/eventos'
-  // Nível do perfil (undefined = carregando). Só o Administrador abre /administracao, /painel-executivo e /historico.
-  const [level,      setLevel]      = useState(undefined)
+  // Cargo e poder do perfil (undefined = carregando).
+  //  • /administracao     → quem tem nível de poder (plenos | medios | baixos)
+  //  • /painel-executivo, /historico e /eventos → cargo Administrador (como antes)
+  const [access,     setAccess]     = useState(undefined)
   const [isRecovery, setIsRecovery] = useState(false)
   const [linkExpired, setLinkExpired] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
@@ -116,12 +118,14 @@ function App() {
     }
   }, [])
 
-  // Nível do perfil, para liberar (ou não) as telas de administrador
+  // Cargo e poder do perfil, para liberar (ou não) as telas de administração
   useEffect(() => {
-    if (!user) { setLevel(undefined); return }
+    if (!user) { setAccess(undefined); return }
     let cancelled = false
-    supabase.from('profiles').select('level').eq('id', user.id).single()
-      .then(({ data }) => { if (!cancelled) setLevel(data?.level ?? null) })
+    supabase.from('profiles').select('level, power_level').eq('id', user.id).single()
+      .then(({ data }) => {
+        if (!cancelled) setAccess({ level: data?.level ?? null, power: data?.power_level ?? null })
+      })
     return () => { cancelled = true }
   }, [user])
 
@@ -132,8 +136,11 @@ function App() {
     if (!user) return ROUTES.login          // login é a raiz: vpsistema.com
     if (path === ROUTES.login) return nextPathRef.current || ROUTES.dashboard
     if (ADMIN_PATHS.includes(path)) {
-      if (level === undefined) return null
-      if (level !== 'Administrador') return ROUTES.dashboard
+      if (access === undefined) return null
+      const allowed = path === ROUTES.admin
+        ? Boolean(access.power)
+        : access.level === 'Administrador'
+      if (!allowed) return ROUTES.dashboard
     }
     return path
   }
@@ -150,7 +157,12 @@ function App() {
 
   // Auditoria: registra a entrada nas telas de administrador, inclusive
   // quando a pessoa abre o endereço direto (favorito, link colado).
+  // Lembra a última tela registrada: o perfil recarrega durante o login
+  // (target passa por null e volta), e sem isso a entrada era logada 2x.
+  const lastAuditRef = useRef(null)
   useEffect(() => {
+    if (!target || target === lastAuditRef.current) return
+    lastAuditRef.current = target
     if (target === ROUTES.admin) logActivity({ action: 'admin_access' })
     if (target === ROUTES.ceo)   logActivity({ action: 'ceo_access' })
     if (target === ROUTES.logs)  logActivity({ action: 'log_access' })
