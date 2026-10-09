@@ -143,7 +143,11 @@ abria a URL crua, sem sessão — o "dá reload" relatado pelos colaboradores).
 │      nenhum (padrão) : R$ desfocado   |   todos : vê todos os valores
 │      (exceções por sistema/valor: próximas etapas — piloto VP HUB)
 └── 🧩 SISTEMAS (module_permissions) — guarda só BLOQUEIOS (can_access = false)
-       (módulos → ações → alcance "meus / meu depto / todos": próximas etapas)
+       └── ▸ Alçadas (catálogo por sistema: catalog_modules / catalog_actions /
+              catalog_value_tags) → ações por módulo (user_grants) e exceções de
+              valor R$ por etiqueta (user_value_exceptions). Catálogo semeado do
+              VP HUB (mesmas chaves de `alcadas_capacidade`) e do VPRequisições
+              (M1 Uso e Consumo/Revenda/Estoque, etapas, aprovação N1/N2/N3).
 ```
 
 **Regras valem no servidor**, não só na tela:
@@ -336,6 +340,7 @@ VITE_SUPABASE_ANON_KEY=eyJ...
 | 09/10/2026 | #50 | Endereço próprio por tela: login em `vpsistema.com`; `/inicio`, `/administracao`, `/painel-executivo`, `/historico` |
 | 09/10/2026 | #51 | Árvore de alçadas — topo: níveis de poder (Plenos/Médios/Baixos) e Valores R$; travas no servidor; `invite-user`/`delete-user` checam o poder. Inauguração: Gelson e Diego plenos; demais Administradores médios; Juliana vê valores |
 | 09/10/2026 | #52 | Inativação com motivo (Demissão / Suspensão de acesso) + mini-relatório; dois celulares (corporativo/pessoal) com número de notificação calculado; acesso às telas de admin não é mais logado em dobro |
+| 09/10/2026 | #55 | Árvore de alçadas — catálogo por sistema (VP HUB 59 módulos, VPRequisições 9) e acordeão na `/administracao`: módulos → ações → exceções de valor R$; mesmas travas de poder no servidor |
 | 09/10/2026 | #54 | Bug "a cada atualização os usuários ganham poderes": sistema novo/reativado/renomeado nasce fechado; README atualizado. Mutirão de segurança acompanhado na issue #53 |
 
 **Lições de deploy (09/10/2026):** edge function publicada pelo conector MCP
