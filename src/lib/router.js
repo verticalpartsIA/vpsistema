@@ -14,7 +14,7 @@ export const ROUTES = {
   logs:      '/historico',
 }
 
-// Telas que só o Administrador abre
+// Telas de administração (regras de quem abre cada uma ficam no App.jsx)
 export const ADMIN_PATHS = [ROUTES.admin, ROUTES.ceo, ROUTES.logs]
 
 const KNOWN = Object.values(ROUTES)

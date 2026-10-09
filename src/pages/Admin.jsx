@@ -4,7 +4,7 @@ import { logActivity } from '../lib/activityLog'
 import {
   ArrowLeft, UserPlus, Search, Loader2, AlertCircle,
   CheckCircle, XCircle, User, X, Send, Shield, Globe, Camera, Pencil,
-  ChevronRight, ChevronDown, Star
+  ChevronRight, ChevronDown, Star, KeyRound, Lock, LockOpen, Puzzle
 } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 
@@ -22,6 +22,16 @@ export const DEPARTMENTS = [
   'Marketing',
 ]
 const LEVELS = ['Administrador', 'Lider', 'Colaborador']
+
+// Topo da árvore de permissões (migration 20261009120000_poderes_e_valores).
+// As regras de quem altera o quê valem no banco; aqui a tela só as reflete.
+const POWER_LEVELS = [
+  { value: 'plenos', label: 'Plenos', hint: 'Igual ao Gelson e ao Diego, inclusive dar poderes a si mesmo.' },
+  { value: 'medios', label: 'Médios', hint: 'Dá poderes a quem está abaixo, mas nunca a si mesmo.' },
+  { value: 'baixos', label: 'Baixos', hint: 'Não abre valores e não dá poderes. Ajusta só departamento e status.' },
+  { value: '',       label: 'Nenhum', hint: 'Não abre a Administração.' },
+]
+const POWER_LABEL = { plenos: 'Plenos', medios: 'Médios', baixos: 'Baixos' }
 
 // Nome de departamento → id utilizável em HTML (o aria-controls do botão de
 // expandir precisa casar com o id do <tbody> do grupo).
@@ -73,6 +83,8 @@ export default function Admin({ onBack }) {
   const [permLevel,     setPermLevel]     = useState('')     // nível em edição
   const [permDept,      setPermDept]      = useState('')     // departamento em edição
   const [permIsLead,    setPermIsLead]    = useState(false)  // líder de departamento em edição
+  const [permPower,     setPermPower]     = useState('')     // nível de poder em edição ('' = nenhum)
+  const [permValues,    setPermValues]    = useState('nenhum') // valores R$: 'nenhum' | 'todos'
   const [permSlugs,     setPermSlugs]     = useState([])     // slugs marcados ([] = acesso pleno)
   const [permFull,      setPermFull]      = useState(true)   // toggle "acesso total"
   const [permLoading,   setPermLoading]   = useState(false)
@@ -106,10 +118,36 @@ export default function Admin({ onBack }) {
   // padrão para todo colaborador; module_permissions só guarda exceções.
   const [blocksMap, setBlocksMap] = useState({})
 
+  // Quem está usando a tela — define o que ela pode alterar em cada pessoa
+  const [myId, setMyId] = useState(null)
+  const myPower = users.find(u => u.id === myId)?.power_level || null
+
+  /** Pode alterar os PODERES (cargo, liderança, valores, sistemas) de `u`? */
+  function canGrantTo(u) {
+    if (!u) return false
+    if (myPower === 'plenos') return true
+    if (myPower === 'medios') return u.id !== myId && (!u.power_level || u.power_level === 'baixos')
+    return false
+  }
+  /** Pode alterar departamento/status de `u`? (baixos: só de quem não tem poder) */
+  function canEditDeptOf(u) {
+    if (!u) return false
+    if (canGrantTo(u)) return true
+    return myPower === 'baixos' && u.id !== myId && !u.power_level
+  }
+  /** Por que não pode — exibido no topo da janela. */
+  function grantBlockReason(u) {
+    if (canGrantTo(u)) return null
+    if (u.id === myId) return 'Você não pode alterar os seus próprios poderes. Só quem tem poderes plenos pode.'
+    if (myPower === 'medios') return 'Com poderes médios você só altera quem está abaixo de você (poder baixo ou nenhum).'
+    return 'Com poderes baixos você não dá poderes nem libera valores.'
+  }
+
   useEffect(() => { loadAll() }, [])
 
   async function loadAll() {
     setLoading(true)
+    supabase.auth.getUser().then(({ data }) => setMyId(data?.user?.id ?? null))
     const [{ data: u }, { data: m }, { data: allPerms }] = await Promise.all([
       supabase.from('profiles').select('*').order('name'),
       supabase.from('modules').select('*').eq('is_active', true).order('sort_order'),
@@ -237,6 +275,8 @@ export default function Admin({ onBack }) {
     setPermLevel(u.level || 'Colaborador')
     setPermDept(u.department || '')
     setPermIsLead(Boolean(u.is_department_lead))
+    setPermPower(u.power_level || '')
+    setPermValues(u.values_access || 'nenhum')
     setPermMsg(null)
     setPermLoading(true)
 
@@ -274,57 +314,77 @@ export default function Admin({ onBack }) {
     setPermSaving(true)
     setPermMsg(null)
 
-    // 1. Atualiza nível, departamento e liderança (department/is_department_lead
-    //    disparam o trigger auto_assign_manager_id no banco, que recalcula
-    //    sozinho a posição desta pessoa no organograma do GenteGestão)
-    const { error: levelErr } = await supabase
-      .from('profiles')
-      .update({ level: permLevel, department: permDept || null, is_department_lead: permIsLead })
-      .eq('id', permUser.id)
+    const canGrant = canGrantTo(permUser)
+    const canDept  = canEditDeptOf(permUser)
 
-    if (levelErr) {
-      setPermMsg({ type: 'error', text: 'Erro ao salvar cargo.' })
-      setPermSaving(false)
-      return
+    // 1. Atualiza só o que esta pessoa tem alçada para mudar (o banco confere
+    //    de novo e recusa o resto). department/is_department_lead disparam o
+    //    trigger auto_assign_manager_id, que recalcula o organograma.
+    const changes = {}
+    if (canGrant) {
+      changes.level              = permLevel
+      changes.is_department_lead = permIsLead
+      changes.values_access      = permValues
     }
+    if (canDept) changes.department = permDept || null
+    if (myPower === 'plenos') changes.power_level = permPower || null
 
-    // 2. Sincroniza module_permissions — que agora guarda só BLOQUEIOS.
-    // Apaga o que existir do usuário e regrava apenas os sistemas desmarcados.
-    await supabase
-      .from('module_permissions')
-      .delete()
-      .eq('user_id', permUser.id)
+    if (Object.keys(changes).length > 0) {
+      const { error: levelErr } = await supabase
+        .from('profiles')
+        .update(changes)
+        .eq('id', permUser.id)
 
-    const blockedSlugs = permFull
-      ? []
-      : modules.map(m => m.slug).filter(s => !permSlugs.includes(s))
-
-    if (blockedSlugs.length > 0) {
-      const rows = blockedSlugs.map(slug => ({
-        user_id: permUser.id,
-        module_slug: slug,
-        can_access: false,
-      }))
-      const { error: insertErr } = await supabase
-        .from('module_permissions')
-        .insert(rows)
-
-      if (insertErr) {
-        setPermMsg({ type: 'error', text: 'Erro ao salvar permissões de módulos.' })
+      if (levelErr) {
+        setPermMsg({ type: 'error', text: levelErr.message || 'Erro ao salvar cargo.' })
         setPermSaving(false)
         return
       }
     }
 
+    // 2. Sincroniza module_permissions — que guarda só BLOQUEIOS. Acesso a
+    //    sistemas é poder: só regrava se tiver alçada sobre esta pessoa.
+    const blockedSlugs = permFull
+      ? []
+      : modules.map(m => m.slug).filter(s => !permSlugs.includes(s))
+
+    if (canGrant) {
+      const { error: delErr } = await supabase
+        .from('module_permissions')
+        .delete()
+        .eq('user_id', permUser.id)
+
+      if (delErr) {
+        setPermMsg({ type: 'error', text: delErr.message || 'Erro ao salvar permissões de módulos.' })
+        setPermSaving(false)
+        return
+      }
+
+      if (blockedSlugs.length > 0) {
+        const rows = blockedSlugs.map(slug => ({
+          user_id: permUser.id,
+          module_slug: slug,
+          can_access: false,
+        }))
+        const { error: insertErr } = await supabase
+          .from('module_permissions')
+          .insert(rows)
+
+        if (insertErr) {
+          setPermMsg({ type: 'error', text: insertErr.message || 'Erro ao salvar permissões de módulos.' })
+          setPermSaving(false)
+          return
+        }
+      }
+    }
+
     // Atualiza lista local de usuários com nível, departamento e liderança
     setUsers(prev => prev.map(p =>
-      p.id === permUser.id
-        ? { ...p, level: permLevel, department: permDept || null, is_department_lead: permIsLead }
-        : p
+      p.id === permUser.id ? { ...p, ...changes } : p
     ))
 
     // Atualiza o mapa local de bloqueios para refletir na tabela imediatamente
-    setBlocksMap(prev => {
+    if (canGrant) setBlocksMap(prev => {
       const next = { ...prev }
       if (blockedSlugs.length === 0) delete next[permUser.id]
       else next[permUser.id] = blockedSlugs
@@ -338,7 +398,10 @@ export default function Admin({ onBack }) {
         nivel: permLevel,
         departamento: permDept || '(nenhum)',
         lider_departamento: permIsLead,
-        acesso: blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
+        poder: POWER_LABEL[permPower] || 'nenhum',
+        valores: permValues === 'todos' ? 'vê todos' : 'não vê',
+        acesso: !canGrant ? '(sem alteração)'
+          : blockedSlugs.length === 0 ? 'pleno' : `bloqueado: ${blockedSlugs.join(', ')}`,
       },
     })
     setPermMsg({ type: 'success', text: 'Permissões salvas com sucesso!' })
@@ -841,6 +904,18 @@ export default function Admin({ onBack }) {
                             'bg-slate-500/20 text-slate-400'}`}>
                           {u.level || 'Colaborador'}
                         </span>
+                        {u.power_level && (
+                          <span title="Nível de poder no vpsistema"
+                                className="ml-1.5 inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300">
+                            <KeyRound className="w-3 h-3" />{POWER_LABEL[u.power_level]}
+                          </span>
+                        )}
+                        {u.values_access === 'todos' && (
+                          <span title="Vê todos os valores R$"
+                                className="ml-1.5 inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">
+                            <LockOpen className="w-3 h-3" />R$
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-4 hidden md:table-cell">
                         {u.job_title
@@ -973,6 +1048,94 @@ export default function Admin({ onBack }) {
             ) : (
               <div className="space-y-6">
 
+                {/* Por que não pode alterar (a regra vale no banco; aqui só explicamos) */}
+                {grantBlockReason(permUser) && (
+                  <div className="flex items-start gap-2 rounded-lg px-4 py-3 text-xs bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                    <Lock className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{grantBlockReason(permUser)}</span>
+                  </div>
+                )}
+
+                {/* 🔑 Nível de poder — topo da árvore; só quem tem Plenos altera */}
+                <div>
+                  <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <KeyRound className="w-3.5 h-3.5 text-brand" />
+                    Nível de poder no vpsistema
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {POWER_LEVELS.map(opt => {
+                      const selected = permPower === opt.value
+                      return (
+                        <label
+                          key={opt.value || 'nenhum'}
+                          title={opt.hint}
+                          className={`flex flex-col gap-0.5 p-3 rounded-lg border transition-colors
+                            ${myPower === 'plenos' ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}
+                            ${selected ? 'border-brand/60 bg-brand/10' : 'border-surface-border'}`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="perm-power"
+                              checked={selected}
+                              disabled={myPower !== 'plenos'}
+                              onChange={() => setPermPower(opt.value)}
+                              className="accent-amber-400"
+                            />
+                            <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-slate-400'}`}>{opt.label}</span>
+                          </span>
+                          <span className="text-slate-500 text-[11px] leading-snug">{opt.hint}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  {myPower !== 'plenos' && (
+                    <p className="text-slate-500 text-xs mt-2">Só quem tem poderes plenos altera o nível de poder.</p>
+                  )}
+                </div>
+
+                {/* ⭐ Valores R$ — vale no ecossistema inteiro */}
+                <div>
+                  <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span className="text-brand">R$</span>
+                    Valores financeiros (todos os sistemas)
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'nenhum', label: 'Não vê valores', hint: 'Os R$ aparecem desfocados.', Icon: Lock },
+                      { value: 'todos',  label: 'Vê todos',       hint: 'Enxerga todos os valores.',  Icon: LockOpen },
+                    ].map(opt => {
+                      const selected = permValues === opt.value
+                      const enabled  = canGrantTo(permUser)
+                      return (
+                        <label
+                          key={opt.value}
+                          className={`flex flex-col gap-0.5 p-3 rounded-lg border transition-colors
+                            ${enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}
+                            ${selected ? 'border-brand/60 bg-brand/10' : 'border-surface-border'}`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="perm-values"
+                              checked={selected}
+                              disabled={!enabled}
+                              onChange={() => setPermValues(opt.value)}
+                              className="accent-amber-400"
+                            />
+                            <opt.Icon className={`w-3.5 h-3.5 ${selected ? 'text-brand' : 'text-slate-500'}`} />
+                            <span className={`text-sm font-medium ${selected ? 'text-white' : 'text-slate-400'}`}>{opt.label}</span>
+                          </span>
+                          <span className="text-slate-500 text-[11px] leading-snug">{opt.hint}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p className="text-slate-500 text-xs mt-2">
+                    Exceções por sistema (ex.: só "valores da P.I.") chegam nas próximas etapas.
+                  </p>
+                </div>
+
                 {/* Cargo */}
                 <div>
                   <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
@@ -981,8 +1144,9 @@ export default function Admin({ onBack }) {
                   <select
                     value={permLevel}
                     onChange={e => setPermLevel(e.target.value)}
+                    disabled={!canGrantTo(permUser)}
                     className="w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-3 py-3 text-sm
-                               focus:outline-none focus:border-brand transition-colors"
+                               focus:outline-none focus:border-brand transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
@@ -996,8 +1160,9 @@ export default function Admin({ onBack }) {
                   <select
                     value={permDept}
                     onChange={e => setPermDept(e.target.value)}
+                    disabled={!canEditDeptOf(permUser)}
                     className="w-full bg-surface border border-surface-border text-slate-300 rounded-lg px-3 py-3 text-sm
-                               focus:outline-none focus:border-brand transition-colors"
+                               focus:outline-none focus:border-brand transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     <option value="">Selecionar</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -1009,6 +1174,7 @@ export default function Admin({ onBack }) {
                   <input
                     type="checkbox"
                     checked={permIsLead}
+                    disabled={!canGrantTo(permUser)}
                     onChange={e => setPermIsLead(e.target.checked)}
                     className="w-4 h-4 accent-amber-400 cursor-pointer"
                   />
@@ -1020,8 +1186,9 @@ export default function Admin({ onBack }) {
 
                 {/* Acesso aos sistemas */}
                 <div>
-                  <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
-                    Acesso aos Sistemas
+                  <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
+                    <Puzzle className="w-3.5 h-3.5 text-brand" />
+                    Sistemas
                   </label>
                   <p className="text-slate-500 text-xs mb-3 leading-relaxed">
                     Todo colaborador cadastrado entra em todos os sistemas por padrão.
@@ -1033,6 +1200,7 @@ export default function Admin({ onBack }) {
                     <input
                       type="checkbox"
                       checked={permFull}
+                      disabled={!canGrantTo(permUser)}
                       onChange={e => toggleFullAccess(e.target.checked)}
                       className="w-4 h-4 accent-amber-400 cursor-pointer"
                     />
@@ -1063,6 +1231,7 @@ export default function Admin({ onBack }) {
                             <input
                               type="checkbox"
                               checked={checked}
+                              disabled={!canGrantTo(permUser)}
                               onChange={() => toggleSlug(mod.slug)}
                               className="w-4 h-4 cursor-pointer shrink-0"
                               style={{ accentColor: modColor }}
@@ -1114,7 +1283,7 @@ export default function Admin({ onBack }) {
 
                 <button
                   onClick={savePerms}
-                  disabled={permSaving}
+                  disabled={permSaving || (!canEditDeptOf(permUser) && myPower !== 'plenos')}
                   className="w-full bg-brand hover:bg-brand-dark disabled:opacity-60 text-surface
                              font-bold rounded-lg py-3 text-sm flex items-center justify-center gap-2
                              transition-colors"

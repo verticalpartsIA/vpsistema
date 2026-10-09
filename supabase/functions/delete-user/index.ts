@@ -102,13 +102,23 @@ Deno.serve(async (req) => {
     const { data: { user: caller } } = await supabaseUser.auth.getUser()
     if (!caller) return new Response(JSON.stringify({ error: 'Sessão inválida' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
-    const { data: callerProfile } = await supabaseUser.from('profiles').select('level').eq('id', caller.id).single()
-    if (callerProfile?.level !== 'Administrador') return new Response(JSON.stringify({ error: 'Apenas administradores podem excluir.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    // Excluir é poder: só plenos e médios (médio nunca exclui a si mesmo,
+    // outro médio ou um pleno). Ver migration 20261009120000_poderes_e_valores.
+    const { data: callerProfile } = await supabaseUser.from('profiles').select('power_level').eq('id', caller.id).single()
+    const callerPower = callerProfile?.power_level
+    if (callerPower !== 'plenos' && callerPower !== 'medios') return new Response(JSON.stringify({ error: 'Você não tem alçada para excluir colaboradores.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
     const { user_id, email } = await req.json()
     if (!user_id) return new Response(JSON.stringify({ error: 'user_id obrigatório' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 
     const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+
+    if (callerPower === 'medios') {
+      const { data: targetProfile } = await supabaseAdmin.from('profiles').select('power_level').eq('id', user_id).maybeSingle()
+      if (user_id === caller.id || targetProfile?.power_level === 'plenos' || targetProfile?.power_level === 'medios') {
+        return new Response(JSON.stringify({ error: 'Você não tem alçada para excluir esta pessoa.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+    }
 
     // 0. Checa se o usuário tem qualquer transação registrada nos satélites
     // com schema de negócio conhecido. Se tiver, exclusão física vira
