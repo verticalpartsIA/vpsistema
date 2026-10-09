@@ -118,6 +118,7 @@ export default function Admin({ onBack }) {
   const [permLoading,   setPermLoading]   = useState(false)
   const [permSaving,    setPermSaving]    = useState(false)
   const [permMsg,       setPermMsg]       = useState(null)
+  const [focusSystem,   setFocusSystem]   = useState(null)   // clique no ícone → janela só daquele sistema
 
   // Modal inativação
   const [toggleUser,    setToggleUser]    = useState(null)
@@ -135,6 +136,7 @@ export default function Admin({ onBack }) {
   // Modal editar colaborador (nome, função, celular)
   const [editNameUser,  setEditNameUser]  = useState(null)   // usuário sendo editado
   const [editNameValue, setEditNameValue] = useState('')
+  const [editEmailValue, setEditEmailValue] = useState('')  // troca de e-mail = troca de login em todo o ecossistema
   const [editFuncaoValue, setEditFuncaoValue] = useState('')
   const [editCorpValue,    setEditCorpValue]    = useState('')   // celular corporativo
   const [editPessValue,    setEditPessValue]    = useState('')   // celular pessoal
@@ -374,6 +376,7 @@ export default function Admin({ onBack }) {
   function openEditProfile(u) {
     setEditNameUser(u)
     setEditNameValue(u.name || '')
+    setEditEmailValue(u.email || '')
     setEditFuncaoValue(u.job_title || '')
     setEditCorpValue(u.celular_corporativo || '')
     setEditPessValue(u.celular_pessoal || '')
@@ -394,10 +397,38 @@ export default function Admin({ onBack }) {
     const oldFuncao  = editNameUser.job_title || null
     const oldCorp    = editNameUser.celular_corporativo || null
     const oldPess    = editNameUser.celular_pessoal || null
-    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCorp === oldCorp && newPess === oldPess
+    const newEmail   = editEmailValue.trim().toLowerCase()
+    const oldEmail   = (editNameUser.email || '').toLowerCase()
+    const emailChanged = Boolean(newEmail) && newEmail !== oldEmail
+    const nothingChanged = newName === oldName && newFuncao === oldFuncao && newCorp === oldCorp && newPess === oldPess && !emailChanged
     if (nothingChanged) {
       setEditNameUser(null)
       return
+    }
+
+    // E-mail é o login e a chave com os outros sistemas: troca pelo servidor,
+    // que atualiza login + cadastro + satélites de uma vez.
+    if (emailChanged) {
+      setEditNameSaving(true)
+      setEditNameMsg(null)
+      const { data: res, error: fnErr } = await supabase.functions.invoke('update-user-email', {
+        body: { user_id: editNameUser.id, new_email: newEmail },
+      })
+      const fnMsg = res?.error || (fnErr && (await fnErr.context?.json?.().catch(() => null))?.error) || fnErr?.message
+      if (fnErr || res?.error) {
+        setEditNameMsg({ type: 'error', text: fnMsg || 'Erro ao trocar o e-mail.' })
+        setEditNameSaving(false)
+        return
+      }
+      setUsers(prev => prev.map(p => p.id === editNameUser.id ? { ...p, email: newEmail } : p))
+      logActivity({
+        action: 'change_email', target: newEmail,
+        details: {
+          nome: editNameUser.name, email: `${oldEmail || '—'} → ${newEmail}`,
+          sistemas: (res?.platforms || []).map(x => `${x.platform}: ${x.status}`).join(' · ') || '—',
+        },
+      })
+      setEditNameSaving(false)
     }
 
     setEditNameSaving(true)
@@ -440,14 +471,15 @@ export default function Admin({ onBack }) {
     }, 1000)
   }
 
-  async function openPerms(u) {
+  async function openPerms(u, focus = null) {
+    setFocusSystem(focus)
     setPermUser(u)
     setPermLevel(u.level || 'Colaborador')
     setPermDept(u.department || '')
     setPermIsLead(Boolean(u.is_department_lead))
     setPermPower(u.power_level || '')
     setPermValues(u.values_access || 'nenhum')
-    setOpenSystems(new Set()); setOpenModules(new Set())
+    setOpenSystems(new Set(focus ? [focus] : [])); setOpenModules(new Set())
     const [{ data: grants }, { data: valex }] = await Promise.all([
       supabase.from('user_grants').select('system_slug, module_key, action_key').eq('user_id', u.id),
       supabase.from('user_value_exceptions').select('system_slug, module_key, tag_key, allow').eq('user_id', u.id),
@@ -1008,7 +1040,8 @@ export default function Admin({ onBack }) {
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Colaborador</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden sm:table-cell">Nível</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Função</th>
-                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular</th>
+                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular corp.</th>
+                    <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden md:table-cell">Celular pessoal</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4">Status</th>
                     <th className="text-left text-xs text-slate-500 uppercase tracking-wider px-4 py-4 hidden lg:table-cell">Acessos</th>
                     <th className="text-right text-xs text-slate-500 uppercase tracking-wider px-6 py-4">Ações</th>
@@ -1139,10 +1172,14 @@ export default function Admin({ onBack }) {
                           : <span className="text-slate-600 text-xs italic">—</span>}
                       </td>
                       <td className="px-4 py-4 hidden md:table-cell">
-                        {u.celular
-                          ? <span className="text-slate-300 text-xs whitespace-nowrap">
-                              {formatCelular(u.celular)}
-                              <span className="ml-1 text-slate-500">({u.celular_corporativo ? 'corp.' : 'pessoal'})</span>
+                        {u.celular_corporativo
+                          ? <span className="text-slate-300 text-xs whitespace-nowrap" title="Recebe as mensagens">{formatCelular(u.celular_corporativo)}</span>
+                          : <span className="text-slate-600 text-xs italic">—</span>}
+                      </td>
+                      <td className="px-4 py-4 hidden md:table-cell">
+                        {u.celular_pessoal
+                          ? <span className="text-slate-300 text-xs whitespace-nowrap" title={u.celular_corporativo ? 'Não recebe mensagens (há corporativo)' : 'Recebe as mensagens'}>
+                              {formatCelular(u.celular_pessoal)}
                             </span>
                           : <span className="text-slate-600 text-xs italic">—</span>}
                       </td>
@@ -1170,31 +1207,28 @@ export default function Admin({ onBack }) {
                             return <span className="text-xs text-slate-600 italic">Sem acesso definido</span>
                           }
 
-                          const visibleMods = modules.filter(m => !blockedSlugs.includes(m.slug))
-
-                          if (visibleMods.length === 0) {
-                            return (
-                              <span className="text-xs text-slate-600 italic">Sem acesso</span>
-                            )
-                          }
+                          const clickable = canGrantTo(u)
                           return (
                             <div className="flex items-center gap-1 flex-wrap">
-                              {visibleMods.map(mod => {
+                              {modules.map(mod => {
                                 const ModIcon = getModuleIcon(mod.icon)
                                 const color   = mod.color || '#F59E0B'
+                                const has     = !blockedSlugs.includes(mod.slug)
+                                const label   = `${mod.name}${has ? '' : ' — sem acesso'}${u.is_placeholder ? ' (sem login ainda)' : ''}${clickable ? ' · clique para ajustar' : ''}`
                                 return (
-                                  <div
+                                  <button
+                                    type="button"
                                     key={mod.slug}
-                                    title={u.is_placeholder ? `${mod.name} (pendente — sem login ainda)` : mod.name}
-                                    className={`w-6 h-6 rounded-md flex items-center justify-center ${u.is_placeholder ? 'opacity-50' : ''}`}
-                                    style={{ background: `${color}20` }}
+                                    title={label}
+                                    disabled={!clickable}
+                                    onClick={() => openPerms(u, mod.slug)}
+                                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-all
+                                      ${has ? '' : 'grayscale opacity-25'} ${u.is_placeholder ? 'opacity-50' : ''}
+                                      ${clickable ? 'cursor-pointer hover:ring-1 hover:ring-white/40 hover:opacity-100 hover:grayscale-0' : 'cursor-default'}`}
+                                    style={{ background: has ? `${color}20` : 'rgba(255,255,255,0.04)' }}
                                   >
-                                    <ModIcon
-                                      className="w-3.5 h-3.5"
-                                      strokeWidth={1.75}
-                                      style={{ color }}
-                                    />
-                                  </div>
+                                    <ModIcon className="w-3.5 h-3.5" strokeWidth={1.75} style={{ color: has ? color : '#64748b' }} />
+                                  </button>
                                 )
                               })}
                             </div>
@@ -1251,7 +1285,9 @@ export default function Admin({ onBack }) {
 
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-white font-bold text-lg">Cargo e Acessos</h2>
+                <h2 className="text-white font-bold text-lg">
+                  {focusSystem ? `Acesso — ${modules.find(m => m.slug === focusSystem)?.name || focusSystem}` : 'Cargo e Acessos'}
+                </h2>
                 <p className="text-slate-500 text-sm mt-0.5">{permUser.name}</p>
               </div>
               <button onClick={() => setPermUser(null)}
@@ -1275,6 +1311,7 @@ export default function Admin({ onBack }) {
                   </div>
                 )}
 
+                {!focusSystem && (<>
                 {/* 🔑 Nível de poder — topo da árvore; só quem tem Plenos altera */}
                 <div>
                   <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
@@ -1403,6 +1440,8 @@ export default function Admin({ onBack }) {
                   </div>
                 </label>
 
+                </>)}
+
                 {/* Acesso aos sistemas */}
                 <div>
                   <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-3">
@@ -1414,6 +1453,7 @@ export default function Admin({ onBack }) {
                     Em ▸ Alçadas você define o que ele pode fazer dentro de cada sistema. Sistemas novos chegam fechados.
                   </p>
 
+                  {!focusSystem && (<>
                   {/* Toggle acesso total */}
                   <label className="flex items-center gap-3 p-3 rounded-lg border border-brand/40 bg-brand/5 cursor-pointer mb-3">
                     <input
@@ -1429,9 +1469,11 @@ export default function Admin({ onBack }) {
                     </div>
                   </label>
 
+                  </>)}
+
                   {/* Sistemas — cada um com a sua árvore de alçadas (clique em ▸ Alçadas) */}
                   <div className="space-y-2">
-                    {modules.map(mod => {
+                    {modules.filter(m => !focusSystem || m.slug === focusSystem).map(mod => {
                       const checked  = permFull || permSlugs.includes(mod.slug)
                       const modColor = mod.color || '#F59E0B'
                       const ModIcon  = getModuleIcon(mod.icon)
@@ -1563,6 +1605,13 @@ export default function Admin({ onBack }) {
                     })}
                   </div>
 
+                  {focusSystem && (
+                    <button type="button" onClick={() => { setFocusSystem(null) }}
+                            className="mt-3 text-xs text-brand hover:underline">
+                      Ver todos os acessos desta pessoa (poder, valores, cargo, outros sistemas)
+                    </button>
+                  )}
+
                   {!permFull && permSlugs.length === 0 && (
                     <p className="text-red-400 text-xs mt-2 italic">
                       Nenhum sistema marcado — o colaborador ficará bloqueado em todos os sistemas.
@@ -1571,7 +1620,7 @@ export default function Admin({ onBack }) {
                 </div>
 
                 {/* 🔁 Substituição temporária (férias) — só quem tem poder */}
-                {(myPower === 'plenos' || myPower === 'medios') && substSystems.length > 0 && (
+                {!focusSystem && (myPower === 'plenos' || myPower === 'medios') && substSystems.length > 0 && (
                   <div>
                     <label className="flex items-center gap-2 text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
                       <Repeat className="w-3.5 h-3.5 text-brand" />
@@ -1727,7 +1776,22 @@ export default function Admin({ onBack }) {
                   className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
                              rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
                 />
-                <p className="text-slate-500 text-xs mt-1">{editNameUser.email}</p>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-500 uppercase tracking-wider">E-mail (login)</label>
+                <input
+                  type="email"
+                  value={editEmailValue}
+                  onChange={e => setEditEmailValue(e.target.value)}
+                  placeholder="nome@verticalparts.com.br"
+                  disabled={!canEditDeptOf(editNameUser)}
+                  className="w-full mt-1 bg-surface border border-surface-border text-white placeholder-slate-600
+                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors disabled:opacity-60"
+                />
+                <p className="text-slate-500 text-xs mt-1">
+                  Trocar aqui muda o login da pessoa e atualiza os sistemas ligados (VPRequisições, Pós-Venda, Propostas, Visitas, Catraca).
+                </p>
               </div>
 
               <div>
