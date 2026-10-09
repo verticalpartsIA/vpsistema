@@ -55,7 +55,8 @@ Regras de projeto:
 
 **Autenticação (por origem):**
 - Cabeçalho `X-Origem: vprequisicoes`.
-- `X-Assinatura: sha256=<HMAC do corpo bruto com o segredo da origem>`, mais `X-Timestamp` (rejeita se a diferença passar de 5 minutos).
+- `X-Timestamp`: segundos desde 1970 (10 dígitos). Rejeitado se a diferença para o relógio do servidor passar de 5 minutos.
+- `X-Assinatura: sha256=<hex>`, com `HMAC-SHA256(segredo da origem, "<X-Timestamp>.<corpo bruto>")`. O timestamp entra na assinatura para impedir reaproveitar uma requisição antiga.
 - Chaves separadas por origem, rotacionáveis, guardadas como hash. Origem inativa recebe 403.
 
 **Corpo:**
@@ -76,7 +77,10 @@ Regras de projeto:
 |---|---|
 | `202` | Aceito (corpo traz `evento_id`). Se a `idempotency_key` já existe, devolve `200` com o mesmo `evento_id`, sem reprocessar. |
 | `400` | Corpo inválido ou fora do JSON Schema do gatilho. |
-| `401` / `403` | Assinatura inválida, timestamp fora da janela ou origem inativa. |
+| `401` | Assinatura inválida, origem desconhecida ou timestamp fora da janela. A resposta é a mesma para origem inexistente e assinatura errada. |
+| `403` | Origem desativada. |
+| `413` | Corpo maior que 64 KB. |
+| `503` | Falha temporária no banco (`Retry-After`). A origem deve tentar de novo com a mesma `idempotency_key`. |
 | `404` | Tipo de evento desconhecido (opção `auto_registrar=false` por padrão: gatilho novo precisa estar no catálogo). |
 | `429` | Limite por origem excedido (`Retry-After`). |
 
