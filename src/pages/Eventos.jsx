@@ -125,25 +125,51 @@ const AVISO_BANCO = (
 )
 
 /* ---------------------------------------------------------------- Painel */
+// Contagem exata feita pelo banco (head: não traz linhas), sem depender de um recorte de 1.000.
+async function contarNoBanco(tabela, filtro) {
+  let q = eventos().from(tabela).select('id', { count: 'exact', head: true })
+  if (filtro) q = filtro(q)
+  const { count, error } = await q
+  return error ? null : count
+}
+
 function Painel({ onAbrir }) {
-  const ev = useTabela('eventos', { select: 'id,status,recebido_em', ordem: 'recebido_em', limite: 1000 })
-  const en = useTabela('envios', { select: 'id,status', limite: 1000 })
+  const [dados, setDados] = useState({ carregando: true, banco: false, eventosHoje: 0, fila: 0, falhas: 0, catalogo: CATALOGO_INICIAL })
+
+  useEffect(() => {
+    let cancelado = false
+    ;(async () => {
+      const inicioDoDia = new Date(); inicioDoDia.setHours(0, 0, 0, 0)
+      const [eventosHoje, fila, falhas, cat] = await Promise.all([
+        contarNoBanco('eventos', q => q.gte('recebido_em', inicioDoDia.toISOString())),
+        contarNoBanco('envios', q => q.in('status', ['pendente', 'processando'])),
+        contarNoBanco('envios', q => q.in('status', ['falha', 'descartado'])),
+        eventos().from('catalogo_gatilhos').select('modo,ativo,origens(slug)').limit(1000),
+      ])
+      if (cancelado) return
+      const banco = eventosHoje !== null && fila !== null && falhas !== null
+      // Catálogo vivo quando o banco responde; senão, o levantamento do inventário.
+      const vivo = !cat.error && (cat.data ?? []).length > 0
+        ? cat.data.map(d => ({ sistema: d.origens?.slug, modo: d.ativo ? d.modo : 'desligado' }))
+        : CATALOGO_INICIAL
+      setDados({ carregando: false, banco, eventosHoje, fila, falhas, catalogo: vivo })
+    })()
+    return () => { cancelado = true }
+  }, [])
 
   const porSistema = useMemo(() => {
     const m = {}
-    for (const c of CATALOGO_INICIAL) {
+    for (const c of dados.catalogo) {
       m[c.sistema] ??= { total: 0, sombra: 0, legado: 0 }
       m[c.sistema].total++
       if (c.modo === 'legado') m[c.sistema].legado++
       else m[c.sistema].sombra++
     }
     return m
-  }, [])
+  }, [dados.catalogo])
 
-  const contar = (arr, st) => arr.filter(x => x.status === st).length
-  const hoje = new Date().toDateString()
-  const eventosHoje = ev.dados.filter(e => new Date(e.recebido_em).toDateString() === hoje).length
-  const banco = !ev.indisponivel && !en.indisponivel
+  const { banco } = dados
+  if (dados.carregando) return <Carregando />
 
   const Kpi = ({ titulo, valor, destaque }) => (
     <div className="bg-surface-card border border-surface-border rounded-2xl p-5">
@@ -156,10 +182,10 @@ function Painel({ onAbrir }) {
     <div>
       {!banco && AVISO_BANCO}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Kpi titulo="Eventos hoje"        valor={banco ? eventosHoje : '—'} />
-        <Kpi titulo="Envios na fila"      valor={banco ? contar(en.dados, 'pendente') + contar(en.dados, 'processando') : '—'} />
-        <Kpi titulo="Falhas"              valor={banco ? contar(en.dados, 'falha') + contar(en.dados, 'descartado') : '—'} destaque={banco ? 'text-red-400' : undefined} />
-        <Kpi titulo="Gatilhos catalogados" valor={CATALOGO_INICIAL.length} destaque="text-violet-400" />
+        <Kpi titulo="Eventos hoje"        valor={banco ? dados.eventosHoje : '—'} />
+        <Kpi titulo="Envios na fila"      valor={banco ? dados.fila : '—'} />
+        <Kpi titulo="Falhas"              valor={banco ? dados.falhas : '—'} destaque={banco ? 'text-red-400' : undefined} />
+        <Kpi titulo="Gatilhos catalogados" valor={dados.catalogo.length} destaque="text-violet-400" />
       </div>
 
       <h2 className="text-slate-400 text-xs font-semibold uppercase tracking-wider mb-3">Gatilhos por sistema</h2>
