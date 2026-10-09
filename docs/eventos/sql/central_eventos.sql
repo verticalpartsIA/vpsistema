@@ -1,4 +1,7 @@
--- Central de Eventos. Aplicado somente na branch `central-eventos` do Supabase (teste).
+-- Central de Eventos: schema `eventos`.
+-- Status: aplicado e testado na branch `central-eventos` (lmdpfjouvpuqdfnqccnc). NÃO aplicado em produção.
+-- Verificado em produção (somente leitura): o schema `eventos` não existe e `public.profiles` tem `id` e `level`.
+-- Para produção: aplicar este arquivo inteiro e depois adicionar `eventos` em Settings > API > Exposed schemas.
 -- Fora de supabase/migrations de propósito: só entra lá com autorização para ir à produção.
 create schema if not exists eventos;
 
