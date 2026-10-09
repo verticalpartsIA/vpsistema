@@ -19,6 +19,7 @@ export const ADMIN_CARD_IMAGES = {
   administracao: IMAGES[2],   // shopping amplo — gestão
   painel:        IMAGES[6],   // átrio dourado — executivo
   logs:          IMAGES[0],   // azul noturno — histórico/log
+  eventos:       IMAGES[7],   // neon cruzado — central de eventos
 }
 
 // Módulos do banco — por slug
