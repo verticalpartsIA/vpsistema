@@ -127,10 +127,42 @@ O WhatsApp passa por `_shared/whatsapp.ts` (Evolution v2, config em secrets). **
    - SLA do VP Requisições (já é 100% no banco, com idempotência);
    - VIP do Pós-Venda, que ganha a deduplicação que hoje não tem.
 
-## 7. Pendências para fechar o inventário
+## 7. Complementos (segunda rodada)
 
-- Ler as edge functions não lidas do Pós-Venda e do HUB (`pv360-delivery-event`, `mcp-server`, `omie-sync-nfs`, `read-inbox`, `capturar-lead-*`, `sso-exchange`).
-- Localizar os pontos de chamada de `notifyWhatsappClient` e `notifyVpClickStage` no VP Requisições.
-- Ler o código de `handle-integration-event` no VP Click (destinatários dos eventos do Pós-Venda).
-- Confirmar `NOTIFY_URL`, o cron externo de handoff e `CLAUDE_AUTO_REPLY` em produção.
-- Mapear os outros 6 sistemas (VP Click, Engenharia, Catraca, Visitas, Propostas, Gente e Gestão).
+### 7.1 VP Requisições: pontos de chamada
+Cada ação do usuário dispara `notifyWhatsappClient` e `notifyVpClickClient` sem esperar resposta. Criar requisição (produtos, frete, manutenção, locação, serviços, viagens) dispara LIDER_CIENCIA e a tarefa V1. Aprovação ou reprovação do gestor (`approval.tsx`), confirmação do vencedor (`quoting.tsx`), decisão financeira (`approval.tsx` e `aprovar.$token.tsx`), compra (`purchasing.tsx`) e recebimento (`receipt.tsx`) completam o fluxo. O e-mail de redefinição de senha é do Supabase Auth.
+
+### 7.2 Pós-Venda 360: itens novos
+- Ferramenta `avisar_departamento` da IA avisa fones de departamento fixos no código e cria o `handoff`. O cron do VPS roda a cada 15 minutos.
+- `sac-engine.ts` também dispara o alerta de atraso e o follow-up VIP, além do NPS.
+- `pv360-delivery-event` atualiza a tarefa no VP Click ao salvar a expedição **(?)**. `omie-sync-nfs` e `mcp-server` não enviam mensagem.
+
+### 7.3 VP Click (`005_vpclick`)
+| Evento | Origem | Destinatário | Canal | Log |
+|---|---|---|---|---|
+| Eventos dos outros sistemas (`handle-integration-event`) | triggers de banco do Pós-Venda e de Propostas | responsável por lista ou departamento | tarefa interna (sem mensagem externa) | tarefa |
+| Observador adicionado, menção, tarefa concluída | triggers → `whatsapp-notify-event` | observador, mencionado, criador | WhatsApp via gateway, em template | `notification_dispatch_log` |
+| Cobrança reativa, resumo diário e inatividade | motor legado na VPS (cron a cada 15 min e diário às 07:00) | usuários ativos com telefone | WhatsApp | **(?)** scripts não lidos |
+| PIN de 2FA | edge function `send-2fa-pin` | usuário | e-mail SMTP | `auth_pins` |
+
+Achados:
+- O caminho novo de WhatsApp está em **dry-run** (só há registros simulados desde 19/09). O motor legado cobre os mesmos eventos, então ligar o envio real sem desligar o legado duplicaria as notificações.
+- Candidato direto à Central: unificar esses dois motores num só.
+
+### 7.4 Outros sistemas (triagem)
+| Sistema | Gatilhos de mensagem | Canal | Log |
+|---|---|---|---|
+| Propostas (`002`) | PIN de login; trigger que cria tarefa no VP Click | e-mail | nenhum |
+| Visitas e Brindes (`006`) | pedido de kit para um e-mail interno fixo; trigger para o VP Click | e-mail SMTP | nenhum |
+| Catraca (`007`) | nenhum no código do repo; triggers de banco **(?)** | n/a | n/a |
+| Gente e Gestão (`17`) | `whatsapp-dispatcher` recebe tudo da instância compartilhada, mostra menu e repassa ao Pós-Venda; `whatsapp-send` e `whatsapp-start` para o RH | WhatsApp | `contratacao_whatsapp_*` |
+| Escamax Compras (`011`) | aprovação de pedido por nível, aprovação do diretor, serviço aguardando CEO, código de acesso | WhatsApp e e-mail | auditoria `whatsapp.aviso_*` e logger |
+
+Observação importante para a Central: **a instância de WhatsApp é única e compartilhada por Requisições, Pós-Venda, Gente e Gestão, Escamax, VP Click e portal.** O roteamento das respostas recebidas (hoje feito pelo dispatcher do Gente e Gestão) precisa ser considerado no desenho do canal.
+
+## 8. Pendências para fechar o inventário
+
+- Ler os scripts de cron da VPS (acesso negado ao agente) e as flags de runtime (`CLAUDE_AUTO_REPLY`, `WHATSAPP_REAL_SEND`, `NOTIFY_URL`).
+- Confirmar triggers de banco da Catraca, de Visitas e de Gente e Gestão.
+- Borderô diário (repo `008`): canal e destinatários desconhecidos.
+- `pv360-delivery-event`, `whatsapp-start` do Gente e Gestão, `summarize-meeting` e `ask-ai`.
