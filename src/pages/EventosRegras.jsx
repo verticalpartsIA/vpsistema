@@ -40,7 +40,7 @@ function useDadosDaCentral(versao) {
     let cancelado = false
     ;(async () => {
       const [g, t, r, d, gr, c] = await Promise.all([
-        eventos().from('catalogo_gatilhos').select('id,tipo,modo,ativo,origens(slug)').order('tipo').limit(500),
+        eventos().from('catalogo_gatilhos').select('id,tipo,modo,ativo,origem_id,origens(slug)').order('tipo').limit(500),
         eventos().from('templates').select('*').order('canal').limit(500),
         eventos().from('regras').select('*').limit(500),
         eventos().from('destinatarios').select('id,nome,tipo,ativo').eq('ativo', true).order('nome').limit(1000),
@@ -61,20 +61,22 @@ function useDadosDaCentral(versao) {
 }
 
 // Payload do último evento real do tipo, para o exemplo de pré-visualização (editável).
-function useAmostra(tipo) {
+function useAmostra(tipo, origemId) {
   const [a, setA] = useState({ tipo: '', texto: '{}', editado: false })
   useEffect(() => {
     if (!tipo) return undefined
     let cancelado = false
     ;(async () => {
-      const { data } = await eventos().from('eventos').select('payload').eq('tipo', tipo)
-        .order('recebido_em', { ascending: false }).limit(1)
+      // O mesmo tipo pode existir em mais de um sistema: filtra também pela origem do gatilho.
+      let q = eventos().from('eventos').select('payload').eq('tipo', tipo)
+      if (origemId) q = q.eq('origem_id', origemId)
+      const { data } = await q.order('recebido_em', { ascending: false }).limit(1)
       if (cancelado) return
       const texto = JSON.stringify(data?.[0]?.payload ?? {}, null, 2)
       setA((prev) => (prev.tipo === tipo && prev.editado ? prev : { tipo, texto, editado: false }))
     })()
     return () => { cancelado = true }
-  }, [tipo])
+  }, [tipo, origemId])
   const texto = a.tipo === tipo ? a.texto : '{}'
   const setTexto = (t) => setA({ tipo, texto: t, editado: true })
   const payload = useMemo(() => { try { const j = JSON.parse(texto); return j && typeof j === 'object' ? j : null } catch { return null } }, [texto])
@@ -116,11 +118,9 @@ function EditorTemplate({ modelo, dados, onFechar, onSalvo }) {
   const novo = !modelo?.id
   const [f, setF] = useState({ canal: modelo?.canal ?? 'whatsapp', assunto: modelo?.assunto ?? '', corpo: modelo?.corpo ?? '' })
   const usadoPor = dados.regras.filter((r) => r.template_id === modelo?.id)
-  const gatilhoDeExemplo = usadoPor.length
-    ? dados.gatilhos.find((g) => g.id === usadoPor[0].gatilho_id)?.tipo ?? ''
-    : ''
-  const [tipoExemplo, setTipoExemplo] = useState(gatilhoDeExemplo)
-  const amostra = useAmostra(tipoExemplo)
+  const [gatilhoExemplo, setGatilhoExemplo] = useState(usadoPor[0]?.gatilho_id ?? '')
+  const gExemplo = dados.gatilhos.find((g) => g.id === gatilhoExemplo)
+  const amostra = useAmostra(gExemplo?.tipo ?? '', gExemplo?.origem_id)
   const [salvando, setSalvando] = useState(false)
   const [erroBanco, setErroBanco] = useState('')
 
@@ -130,7 +130,7 @@ function EditorTemplate({ modelo, dados, onFechar, onSalvo }) {
 
   async function salvar() {
     setSalvando(true); setErroBanco('')
-    const linha = { canal: f.canal, assunto: f.assunto.trim() || null, corpo: f.corpo }
+    const linha = { canal: usadoPor.length ? modelo.canal : f.canal, assunto: f.assunto.trim() || null, corpo: f.corpo }
     const q = novo
       ? eventos().from('templates').insert(linha)
       : eventos().from('templates').update({ ...linha, versao: (modelo.versao ?? 1) + 1 }).eq('id', modelo.id)
@@ -167,8 +167,8 @@ function EditorTemplate({ modelo, dados, onFechar, onSalvo }) {
       )}>
       {emUsoAtivo && <Aviso>Este template é usado por uma regra de gatilho <strong>ativo</strong>: ao salvar, a nova mensagem vale já nos próximos envios reais.</Aviso>}
       {usadoPor.length > 0 && !emUsoAtivo && <p className="text-xs text-slate-500">Usado por {usadoPor.length} regra(s).</p>}
-      <Campo rotulo="Canal">
-        <select value={f.canal} onChange={(e) => setF({ ...f, canal: e.target.value })} className={INPUT}>
+      <Campo rotulo="Canal" dica={usadoPor.length ? 'Template em uso por regras: o canal não pode mudar. Crie outro template para outro canal.' : undefined}>
+        <select value={f.canal} onChange={(e) => setF({ ...f, canal: e.target.value })} disabled={usadoPor.length > 0} className={INPUT}>
           {dados.canais.map((c) => <option key={c.slug} value={c.slug}>{c.slug}{CANAIS_COM_ENVIO.includes(c.slug) ? '' : ' (ainda sem envio)'}</option>)}
         </select>
       </Campo>
@@ -187,9 +187,9 @@ function EditorTemplate({ modelo, dados, onFechar, onSalvo }) {
         ))}
       </div>
       <Campo rotulo="Pré-visualizar com os dados de qual gatilho?">
-        <select value={tipoExemplo} onChange={(e) => setTipoExemplo(e.target.value)} className={INPUT}>
+        <select value={gatilhoExemplo} onChange={(e) => setGatilhoExemplo(e.target.value)} className={INPUT}>
           <option value="">(dados vazios)</option>
-          {dados.gatilhos.map((g) => <option key={g.id} value={g.tipo}>{g.tipo}</option>)}
+          {dados.gatilhos.map((g) => <option key={g.id} value={g.id}>{g.tipo}{g.origens?.slug ? ` (${SISTEMAS[g.origens.slug] ?? g.origens.slug})` : ''}</option>)}
         </select>
       </Campo>
       <BlocoAmostra amostra={amostra} />
@@ -267,7 +267,7 @@ function EditorRegra({ regra, dados, onFechar, onSalvo }) {
 
   const gatilho = dados.gatilhos.find((g) => g.id === f.gatilho_id)
   const template = dados.templates.find((t) => t.id === f.template_id)
-  const amostra = useAmostra(gatilho?.tipo ?? '')
+  const amostra = useAmostra(gatilho?.tipo ?? '', gatilho?.origem_id)
   const erros = validarRegra(f, template)
   const pessoas = dados.destinatarios.filter((d) => !busca || d.nome.toLowerCase().includes(busca.toLowerCase()))
 
