@@ -5,7 +5,7 @@ import { Aviso, Carregando, Chip, Vazio } from './eventosUi'
 import RegrasETemplates from './EventosRegras'
 import {
   ArrowLeft, Radio, LayoutDashboard, Activity, ListTree, Workflow, Users, Plug,
-  Inbox, AlertTriangle, ShieldCheck, RefreshCw, RotateCcw,
+  Inbox, AlertTriangle, ShieldCheck, RefreshCw, RotateCcw, MessageSquare,
 } from 'lucide-react'
 
 // Central de Eventos (/eventos). Lê o schema `eventos` do Supabase. Enquanto o
@@ -22,6 +22,7 @@ const TABS = [
   { id: 'destinatarios', label: 'Destinatários',         icon: Users },
   { id: 'canais',        label: 'Canais',                icon: Plug },
   { id: 'fila',          label: 'Fila de Envios',        icon: Inbox },
+  { id: 'mensagens',     label: 'Mensagens Enviadas',    icon: MessageSquare },
   { id: 'falhas',        label: 'Falhas e Reenvios',     icon: AlertTriangle },
   { id: 'auditoria',     label: 'Auditoria',             icon: ShieldCheck },
 ]
@@ -325,6 +326,33 @@ function Fila() {
   )
 }
 
+// Quem recebeu, o texto da mensagem e de qual sistema ela partiu. "Enviadas" = entregues de verdade;
+// "Simuladas" = o que a Central teria enviado em modo sombra (nada saiu).
+function Mensagens() {
+  const [quais, setQuais] = useState('enviado')
+  return (
+    <div>
+      <div className="mb-4">
+        <select value={quais} onChange={e => setQuais(e.target.value)}
+          className="bg-surface-card border border-surface-border text-slate-300 rounded-lg px-4 py-2 text-sm">
+          <option value="enviado">Enviadas</option>
+          <option value="simulado">Simuladas (modo sombra, nada foi enviado)</option>
+        </select>
+      </div>
+      <TabelaBanco tabela="envios" select="id,mensagem_renderizada,destinatarios(nome),eventos(origens(slug))" ordem="agendado_para"
+        filtro={q => q.eq('status', quais)} versao={quais}
+        vazio={quais === 'enviado'
+          ? 'Nenhuma mensagem enviada pela Central ainda. Enquanto os gatilhos estão em sombra, veja as simuladas.'
+          : 'Nenhuma mensagem simulada ainda.'}
+        colunas={[
+          { k: 'nome', t: 'Nome', r: l => l.destinatarios?.nome ?? '—' },
+          { k: 'mensagem', t: 'Mensagem', r: l => <span className="whitespace-pre-wrap break-words">{l.mensagem_renderizada ?? '—'}</span> },
+          { k: 'site', t: 'Site', r: l => SISTEMAS[l.eventos?.origens?.slug] ?? l.eventos?.origens?.slug ?? '—' },
+        ]} />
+    </div>
+  )
+}
+
 function Falhas() {
   const [versao, setVersao] = useState(0)
   // Passa pela função do banco (eventos.reenviar_envio): confere que é administrador, zera as
@@ -422,6 +450,7 @@ export default function Eventos({ onBack }) {
         {aba === 'destinatarios' && <Destinatarios />}
         {aba === 'canais'        && <Canais />}
         {aba === 'fila'          && <Fila />}
+        {aba === 'mensagens'     && <Mensagens />}
         {aba === 'falhas'        && <Falhas />}
         {aba === 'auditoria'     && <Auditoria />}
       </main>
