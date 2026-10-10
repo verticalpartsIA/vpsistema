@@ -51,6 +51,7 @@ export const CATALOGO_INICIAL = [
   g('vpclick', 'tarefa.observador_adicionado','Pessoa adicionada como observador da tarefa', 'Observador',                  'WhatsApp', 'whatsapp-notify-event (dry-run) e motor legado'),
   g('vpclick', 'tarefa.mencao',               'Pessoa mencionada em tarefa ou comentário',    'Mencionado',                 'WhatsApp', 'whatsapp-notify-event (dry-run) e motor legado'),
   g('vpclick', 'tarefa.concluida',            'Tarefa concluída ou cancelada',                'Criador da tarefa',          'WhatsApp', 'whatsapp-notify-event (dry-run) e motor legado'),
+  g('vpclick', 'reuniao.marcada',             'Reunião marcada',                              'Participantes da reunião',   'WhatsApp', 'Ainda não publica na Central'),
   g('vpclick', 'tarefa.resumo_diario',        'Resumo diário de atrasadas e inatividade',     'Usuários ativos com telefone','WhatsApp', 'motor legado na VPS', 'legado'),
   // Portal
   g('vpsistema', 'acesso.codigo_2fa',        'Código de verificação no login',            'Usuário',                    'WhatsApp', 'two-factor', 'legado'),
