@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { CATALOGO_INICIAL, SISTEMAS } from '../lib/eventosCatalogo'
+import { Aviso, Carregando, Chip, Vazio } from './eventosUi'
+import RegrasETemplates from './EventosRegras'
 import {
   ArrowLeft, Radio, LayoutDashboard, Activity, ListTree, Workflow, Users, Plug,
-  Inbox, AlertTriangle, ShieldCheck, Loader2, RefreshCw, Info, RotateCcw,
+  Inbox, AlertTriangle, ShieldCheck, RefreshCw, RotateCcw,
 } from 'lucide-react'
 
 // Central de Eventos (/eventos). Lê o schema `eventos` do Supabase. Enquanto o
@@ -51,28 +53,6 @@ const mascara = (tel) => {
   return d.length >= 6 ? `${d.slice(0, 2)}•••••${d.slice(-4)}` : '—'
 }
 
-function Chip({ cls, children }) {
-  return <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full border font-medium ${cls}`}>{children}</span>
-}
-
-function Aviso({ children }) {
-  return (
-    <div className="flex items-start gap-3 bg-violet-500/10 border border-violet-500/20 text-violet-200 rounded-xl px-4 py-3 text-sm mb-5">
-      <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-      <div>{children}</div>
-    </div>
-  )
-}
-
-function Vazio({ texto }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-16 text-slate-500">
-      <Radio className="w-10 h-10 mb-3 opacity-30" />
-      <p className="text-sm text-center max-w-md">{texto}</p>
-    </div>
-  )
-}
-
 function Tabela({ colunas, linhas, vazio }) {
   if (!linhas.length) return <Vazio texto={vazio} />
   return (
@@ -112,10 +92,6 @@ function useTabela(tabela, { select = '*', ordem, filtro, limite = 100, versao }
     return () => { cancelado = true }
   }, [tabela, select, ordem, limite, versao]) // eslint-disable-line react-hooks/exhaustive-deps
   return estado
-}
-
-function Carregando() {
-  return <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 text-brand animate-spin" /></div>
 }
 
 const AVISO_BANCO = (
@@ -307,19 +283,6 @@ function Monitor() {
   )
 }
 
-function Regras() {
-  return (
-    <TabelaBanco tabela="regras" select="id,ativa,canais,prioridade,catalogo_gatilhos(tipo)"
-      vazio="Nenhuma regra de comunicação criada. Cada regra define quando, por qual canal e para quem enviar."
-      colunas={[
-        { k: 'gatilho', t: 'Gatilho', r: l => <code className="text-violet-300 text-xs">{l.catalogo_gatilhos?.tipo ?? '—'}</code> },
-        { k: 'canais', t: 'Canais', r: l => (l.canais ?? []).join(', ') },
-        { k: 'prioridade', t: 'Prioridade' },
-        { k: 'ativa', t: 'Estado', r: l => l.ativa ? 'Ativa' : 'Inativa' },
-      ]} />
-  )
-}
-
 function Destinatarios() {
   return (
     <TabelaBanco tabela="destinatarios" select="id,nome,tipo,whatsapp,email,ativo"
@@ -455,7 +418,7 @@ export default function Eventos({ onBack }) {
         {aba === 'painel'        && <Painel onAbrir={abrir} />}
         {aba === 'monitor'       && <Monitor />}
         {aba === 'catalogo'      && <Catalogo sistemaInicial={sistemaFiltro} />}
-        {aba === 'regras'        && <Regras />}
+        {aba === 'regras'        && <RegrasETemplates />}
         {aba === 'destinatarios' && <Destinatarios />}
         {aba === 'canais'        && <Canais />}
         {aba === 'fila'          && <Fila />}

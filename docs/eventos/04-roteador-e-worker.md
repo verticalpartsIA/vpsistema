@@ -56,3 +56,13 @@ evento (recebido) ──rotear_pendentes()──► envios ──eventos-worker�
 - O **agendamento `pg_cron`** não rodou na branch (ela não tem a extensão); o mesmo comando foi executado
   manualmente e funcionou. O envio real pela **Evolution** não foi testado: nos testes um eco ocupou o lugar dela.
 - O limite de 20 envios por minuto vale para o canal todo, não por sistema.
+
+## Tela de regras e templates
+
+A aba **Regras de Comunicação** de `/eventos` (administradores) cria e edita regras e templates sem SQL:
+
+- **Templates**: canal e texto com `{{campo}}`, pré-visualização com o payload do último evento real do gatilho (editável) e aviso de variável que não existe no exemplo. Só é possível excluir um template que nenhuma regra usa.
+- **Regras**: gatilho, condições (campo/operador/valor), canal, template, destino (pessoas, grupos e/ou campo do evento com o e-mail), janela de envio, atraso e prioridade. Não há exclusão: regra com envios já registrados é só desativada.
+- Só o canal `whatsapp` pode ser escolhido; `interno` e `email` aparecem desabilitados até existirem os adaptadores.
+- Se o gatilho está em modo **Ativo**, salvar uma regra ou template usado por ele vale para envios reais e a tela avisa.
+- Toda gravação passa pela auditoria do banco (trigger `eventos.auditar`); a RLS (`eventos.is_admin()`) é quem garante que só administrador escreve. A lógica de validação e de montagem do JSON está em `src/lib/eventosRegras.js` (testes em `src/lib/__tests__/`, rodar com `node --experimental-strip-types --test`).
