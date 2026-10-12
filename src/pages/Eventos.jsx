@@ -4,7 +4,7 @@ import { CATALOGO_INICIAL, SISTEMAS } from '../lib/eventosCatalogo'
 import { Aviso, Carregando, Chip, Vazio } from './eventosUi'
 import RegrasETemplates from './EventosRegras'
 import {
-  ArrowLeft, Radio, LayoutDashboard, Activity, ListTree, Workflow, Users, Plug,
+  ArrowLeft, LayoutDashboard, Activity, ListTree, Workflow, Users, Plug,
   Inbox, AlertTriangle, ShieldCheck, RefreshCw, RotateCcw, MessageSquare,
 } from 'lucide-react'
 
@@ -411,9 +411,7 @@ export default function Eventos({ onBack }) {
               className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div className="w-9 h-9 rounded-xl bg-violet-500/20 flex items-center justify-center">
-              <Radio className="w-5 h-5 text-violet-400" />
-            </div>
+            <img src="/vp-mark.png" alt="VP" className="w-9 h-9 object-contain" />
             <div>
               <h1 className="text-white font-semibold">Central de Eventos</h1>
               <p className="text-slate-500 text-xs">Gatilhos, comunicações e envios dos sistemas</p>

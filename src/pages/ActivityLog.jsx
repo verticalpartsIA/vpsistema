@@ -171,7 +171,7 @@ export default function ActivityLog({ onBack }) {
               <ArrowLeft className="w-5 h-5" />
             </button>
             <div className="flex items-center gap-2">
-              <Activity className="w-5 h-5 text-sky-400" />
+              <img src="/vp-mark.png" alt="VP" className="w-9 h-9 object-contain" />
               <h1 className="text-white font-bold text-lg">Activity Log</h1>
             </div>
           </div>

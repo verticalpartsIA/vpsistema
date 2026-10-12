@@ -930,9 +930,7 @@ export default function Admin({ onBack }) {
             </button>
             <span className="text-surface-border">|</span>
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-brand flex items-center justify-center">
-                <span className="text-surface font-black text-sm">VP</span>
-              </div>
+              <img src="/vp-mark.png" alt="VP" className="w-9 h-9 object-contain" />
               <span className="text-white font-semibold">Gestão de Colaboradores</span>
             </div>
           </div>
