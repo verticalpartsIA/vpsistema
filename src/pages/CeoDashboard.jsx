@@ -461,7 +461,7 @@ export default function CeoDashboard({ onBack }) {
             </button>
             <span className="text-surface-border">|</span>
             <div className="flex items-center gap-3">
-              <img src="/vp-logo.png" alt="VP" className="w-9 h-9 rounded-xl object-cover" />
+              <img src="/vp-mark.png" alt="VP" className="w-9 h-9 object-contain" />
               <div>
                 {/* Página sem nenhum heading até aqui — leitor de tela não
                     tinha por onde navegar a estrutura. h1 (só um por página). */}
