@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "5174"],
       "port": 5174
+    },
+    {
+      "name": "vphub-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\dev\\SitesProjetos\\010_GestaoImportacao\\server.js"],
+      "port": 3000
     }
   ]
 }
