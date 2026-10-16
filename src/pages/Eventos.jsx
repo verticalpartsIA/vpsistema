@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { ROUTES, navigate, subrota } from '../lib/router'
 import { CATALOGO_INICIAL, SISTEMAS } from '../lib/eventosCatalogo'
-import { Aviso, Carregando, Chip, Vazio } from './eventosUi'
+import { Aviso, Campo, Carregando, Chip, INPUT, Modal, Vazio } from './eventosUi'
 import RegrasETemplates from './EventosRegras'
 import {
   ArrowLeft, LayoutDashboard, Activity, ListTree, Workflow, Users, Plug,
@@ -310,6 +310,7 @@ const SITUACAO_EXTERNA = {
   na_fila:    { label: 'fora do horário', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   autor:      { label: 'é o autor',      cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
   sem_numero: { label: 'sem WhatsApp',   cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  pausado:    { label: 'Pausado',        cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   erro:       { label: 'erro',           cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
 }
 
@@ -371,16 +372,228 @@ function Monitor() {
   )
 }
 
-function Destinatarios() {
+/* ------------------------------------------------- Destinatários e pausa do WhatsApp */
+const SELECT_DEST = 'id,nome,tipo,whatsapp,email,ativo,aceita_whatsapp,whatsapp_pausa_assuntos,whatsapp_pausa_ate,whatsapp_pausa_motivo,whatsapp_pausa_por,whatsapp_pausa_em'
+
+const DURACOES = [
+  { id: 'religar', rotulo: 'Até eu religar' },
+  { id: '1d',      rotulo: '1 dia',     ms: 24 * 3600e3 },
+  { id: '3d',      rotulo: '3 dias',    ms: 3 * 24 * 3600e3 },
+  { id: '1s',      rotulo: '1 semana',  ms: 7 * 24 * 3600e3 },
+  { id: 'data',    rotulo: 'Até uma data e hora' },
+]
+
+// Pausa vencida (whatsapp_pausa_ate no passado) vale como ligado, igual ao gi-avisos.
+function situacaoPausa(d, agora = Date.now()) {
+  if (!d.whatsapp) return { id: 'sem_numero' }
+  const assuntos = d.whatsapp_pausa_assuntos ?? []
+  const total = d.aceita_whatsapp === false
+  if (!total && !assuntos.length) return { id: 'ligado' }
+  const ate = d.whatsapp_pausa_ate ? new Date(d.whatsapp_pausa_ate).getTime() : null
+  if (ate !== null && ate <= agora) return { id: 'ligado', venceu: d.whatsapp_pausa_ate }
+  return { id: total ? 'pausado' : 'parcial' }
+}
+
+const paraCampoData = (iso) => {
+  const d = new Date(iso), p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function ResumoPausa({ d, sit, rotulos }) {
+  if (sit.venceu) return <span className="text-slate-500 text-xs">pausa venceu em {fmtData(sit.venceu)}</span>
+  if (sit.id !== 'pausado' && sit.id !== 'parcial') return <span className="text-slate-500">—</span>
+  const partes = [
+    sit.id === 'pausado' ? 'Todos os assuntos' : (d.whatsapp_pausa_assuntos ?? []).map(s => rotulos[s] ?? s).join(', '),
+    d.whatsapp_pausa_ate ? `até ${fmtData(d.whatsapp_pausa_ate)}` : 'até religar',
+    d.whatsapp_pausa_por ? `por ${d.whatsapp_pausa_por}, ${fmtData(d.whatsapp_pausa_em)}` : null,
+  ].filter(Boolean)
+  return <span className="text-xs text-slate-300" title={d.whatsapp_pausa_motivo ? `Motivo: ${d.whatsapp_pausa_motivo}` : ''}>{partes.join(' · ')}</span>
+}
+
+function PausaModal({ d, assuntos, onFechar, onSalvar }) {
+  const sit = situacaoPausa(d)
+  const [modo, setModo] = useState(sit.id === 'parcial' ? 'parcial' : 'tudo')
+  const [marcados, setMarcados] = useState(() => new Set(sit.id === 'parcial' ? d.whatsapp_pausa_assuntos : []))
+  const [duracao, setDuracao] = useState(() => (sit.id !== 'ligado' && d.whatsapp_pausa_ate ? 'data' : 'religar'))
+  const [data, setData] = useState(() => (sit.id !== 'ligado' && d.whatsapp_pausa_ate ? paraCampoData(d.whatsapp_pausa_ate) : ''))
+  const [motivo, setMotivo] = useState(sit.id !== 'ligado' ? d.whatsapp_pausa_motivo ?? '' : '')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+
+  const alternar = (slug) => setMarcados(m => { const n = new Set(m); n.has(slug) ? n.delete(slug) : n.add(slug); return n })
+
+  async function salvar() {
+    let ate = null
+    if (duracao === 'data') {
+      const t = new Date(data).getTime()
+      if (!data || Number.isNaN(t) || t <= Date.now()) return setErro('Escolha uma data e hora no futuro.')
+      ate = new Date(t).toISOString()
+    } else if (duracao !== 'religar') {
+      ate = new Date(Date.now() + DURACOES.find(x => x.id === duracao).ms).toISOString()
+    }
+    if (modo === 'parcial' && !marcados.size) return setErro('Marque pelo menos um assunto para pausar.')
+    setSalvando(true)
+    const falha = await onSalvar({
+      aceita_whatsapp: modo !== 'tudo',
+      whatsapp_pausa_assuntos: modo === 'parcial' ? [...marcados] : null,
+      whatsapp_pausa_ate: ate,
+      whatsapp_pausa_motivo: motivo.trim() || null,
+    })
+    if (falha) { setErro(falha); setSalvando(false) }
+  }
+
   return (
-    <TabelaBanco tabela="destinatarios" select="id,nome,tipo,whatsapp,email,ativo"
-      vazio="Nenhum destinatário cadastrado. Pessoas internas vêm dos perfis do portal; contatos externos são cadastrados aqui."
-      colunas={[
-        { k: 'nome', t: 'Nome' },
-        { k: 'tipo', t: 'Tipo' },
-        { k: 'whatsapp', t: 'WhatsApp', r: l => mascara(l.whatsapp) },
-        { k: 'ativo', t: 'Estado', r: l => l.ativo ? 'Ativo' : 'Inativo' },
-      ]} />
+    <Modal titulo={`Pausar WhatsApp — ${d.nome}`} onFechar={onFechar}
+      rodape={<>
+        <button onClick={onFechar} className="text-sm text-slate-400 hover:text-white px-3 py-2">Cancelar</button>
+        <button onClick={salvar} disabled={salvando}
+          className="text-sm bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-lg px-4 py-2 disabled:opacity-50">
+          {salvando ? 'Salvando…' : 'Pausar'}
+        </button>
+      </>}>
+      <Aviso>Durante a pausa as mensagens <strong>não são guardadas</strong> para depois; aparecem no Monitor como "Pausado".</Aviso>
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 text-sm text-slate-200">
+          <input type="radio" name="modo" checked={modo === 'tudo'} onChange={() => setModo('tudo')} /> Pausar tudo
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-200">
+          <input type="radio" name="modo" checked={modo === 'parcial'} onChange={() => setModo('parcial')} /> Pausar só alguns assuntos
+        </label>
+      </div>
+
+      {modo === 'parcial' && (
+        <div className="space-y-2 border border-surface-border rounded-xl p-3">
+          {assuntos.map(a => (
+            <label key={a.slug} className={`flex items-start gap-2 text-sm ${a.pausavel ? 'text-slate-200' : 'text-slate-500'}`}>
+              <input type="checkbox" className="mt-1" disabled={!a.pausavel}
+                checked={a.pausavel && marcados.has(a.slug)} onChange={() => alternar(a.slug)} />
+              <span>
+                {a.rotulo}
+                <span className="block text-xs text-slate-500">{a.pausavel ? a.exemplos : 'Pedido de assinatura sempre chega.'}</span>
+              </span>
+            </label>
+          ))}
+          {!assuntos.length && <p className="text-xs text-slate-500">Não foi possível carregar os assuntos.</p>}
+        </div>
+      )}
+
+      <Campo rotulo="Até quando">
+        <select value={duracao} onChange={e => setDuracao(e.target.value)} className={INPUT}>
+          {DURACOES.map(x => <option key={x.id} value={x.id}>{x.rotulo}</option>)}
+        </select>
+      </Campo>
+      {duracao === 'data' && (
+        <Campo rotulo="Data e hora para voltar">
+          <input type="datetime-local" value={data} onChange={e => setData(e.target.value)} className={INPUT} />
+        </Campo>
+      )}
+      <Campo rotulo="Motivo (opcional)">
+        <input value={motivo} onChange={e => setMotivo(e.target.value)} className={INPUT} placeholder="Ex.: férias, excesso de avisos" />
+      </Campo>
+      {erro && <p className="text-sm text-red-400">{erro}</p>}
+    </Modal>
+  )
+}
+
+function Destinatarios() {
+  const db = useTabela('destinatarios', { select: SELECT_DEST, limite: 500 })
+  const ass = useTabela('assuntos_whatsapp', { select: 'slug,rotulo,exemplos,ordem,pausavel', limite: 50 })
+  const [linhas, setLinhas] = useState([])
+  const [busca, setBusca] = useState('')
+  const [soPausados, setSoPausados] = useState(false)
+  const [editando, setEditando] = useState(null)
+  const [ocupado, setOcupado] = useState(null)
+  const [aviso, setAviso] = useState(null)
+
+  useEffect(() => { setLinhas([...db.dados].sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'))) }, [db.dados])
+  const assuntos = useMemo(() => [...ass.dados].sort((a, b) => a.ordem - b.ordem), [ass.dados])
+  const rotulos = useMemo(() => Object.fromEntries(assuntos.map(a => [a.slug, a.rotulo])), [assuntos])
+
+  // Devolve texto de erro (ou null). A linha é atualizada na tela sem recarregar.
+  async function gravar(d, patch) {
+    const { data, error } = await eventos().from('destinatarios').update(patch).eq('id', d.id).select(SELECT_DEST)
+    if (error) return 'Não foi possível salvar: ' + error.message
+    if (!data?.length) return 'Não foi possível salvar: sem permissão ou o destinatário não existe mais.'
+    setLinhas(ls => ls.map(l => (l.id === d.id ? data[0] : l)))
+    return null
+  }
+
+  async function religar(d) {
+    setOcupado(d.id)
+    const falha = await gravar(d, { aceita_whatsapp: true, whatsapp_pausa_assuntos: null, whatsapp_pausa_ate: null, whatsapp_pausa_motivo: null })
+    setOcupado(null)
+    setAviso(falha ? { erro: true, texto: falha } : { texto: `WhatsApp de ${d.nome} religado.` })
+  }
+
+  async function pausar(patch) {
+    const d = editando
+    const falha = await gravar(d, patch)
+    if (!falha) { setEditando(null); setAviso({ texto: `WhatsApp de ${d.nome} pausado.` }) }
+    return falha
+  }
+
+  if (db.carregando) return <Carregando />
+  if (db.indisponivel) return AVISO_BANCO
+
+  const agora = Date.now()
+  const visiveis = linhas.filter(l => {
+    if (busca && !String(l.nome).toLowerCase().includes(busca.trim().toLowerCase())) return false
+    if (soPausados) { const s = situacaoPausa(l, agora).id; return s === 'pausado' || s === 'parcial' }
+    return true
+  })
+
+  const colunas = [
+    { k: 'nome', t: 'Nome' },
+    { k: 'tipo', t: 'Tipo' },
+    { k: 'whatsapp', t: 'Número', r: l => mascara(l.whatsapp) },
+    { k: 'ativo', t: 'Estado', r: l => l.ativo ? 'Ativo' : 'Inativo' },
+    { k: 'wpp', t: 'WhatsApp', r: l => {
+      const s = situacaoPausa(l, agora)
+      if (s.id === 'sem_numero') return <Chip cls="bg-slate-500/10 text-slate-400 border-slate-500/20">Sem número</Chip>
+      const rot = { ligado: 'Ligado', pausado: 'Pausado', parcial: 'Parcial' }[s.id]
+      const cor = { ligado: 'text-green-400', pausado: 'text-amber-400', parcial: 'text-amber-400' }[s.id]
+      return (
+        <span className="flex items-center gap-3">
+          <Interruptor ligado={s.id !== 'pausado'} parcial={s.id === 'parcial'} ocupado={ocupado === l.id}
+            rotulo={`WhatsApp de ${l.nome}`} onClick={() => (s.id === 'ligado' ? setEditando(l) : religar(l))} />
+          <span className={cor}>{rot}</span>
+        </span>
+      )
+    } },
+    { k: 'pausa', t: 'Pausa', r: l => {
+      const s = situacaoPausa(l, agora)
+      const pausa = s.id === 'pausado' || s.id === 'parcial'
+      return (
+        <div className="flex flex-col gap-1">
+          <ResumoPausa d={l} sit={s} rotulos={rotulos} />
+          {pausa && <button onClick={() => setEditando(l)} className="text-xs text-violet-300 hover:text-violet-200 text-left">Editar pausa</button>}
+        </div>
+      )
+    } },
+  ]
+
+  return (
+    <div>
+      {aviso && (
+        <div className={`mb-4 text-sm rounded-xl px-4 py-3 border ${aviso.erro ? 'bg-red-500/10 border-red-500/20 text-red-300' : 'bg-green-500/10 border-green-500/20 text-green-300'}`}>
+          {aviso.texto}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar por nome"
+          className="bg-surface-card border border-surface-border text-slate-300 rounded-lg px-4 py-2 text-sm w-64" />
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={soPausados} onChange={e => setSoPausados(e.target.checked)} /> Só pausados
+        </label>
+        <span className="text-slate-500 text-xs">{visiveis.length} de {linhas.length}</span>
+      </div>
+      <Tabela colunas={colunas} linhas={visiveis}
+        vazio={linhas.length
+          ? 'Nenhuma pessoa para este filtro.'
+          : 'Nenhum destinatário cadastrado. Pessoas internas vêm dos perfis do portal; contatos externos são cadastrados aqui.'} />
+      {editando && <PausaModal d={editando} assuntos={assuntos} onFechar={() => setEditando(null)} onSalvar={pausar} />}
+    </div>
   )
 }
 
@@ -393,10 +606,10 @@ async function definirCanais(slugs, ativo) {
   return !error
 }
 
-function Interruptor({ ligado, ocupado, onClick, rotulo }) {
+function Interruptor({ ligado, ocupado, onClick, rotulo, parcial }) {
   return (
     <button type="button" role="switch" aria-checked={ligado} aria-label={rotulo} disabled={ocupado} onClick={onClick}
-      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${ligado ? 'bg-green-500' : 'bg-slate-600'}`}>
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${parcial ? 'bg-amber-500' : ligado ? 'bg-green-500' : 'bg-slate-600'}`}>
       <span className={`inline-block h-5 w-5 rounded-full bg-white transition-transform ${ligado ? 'translate-x-5' : 'translate-x-0.5'}`} />
     </button>
   )
