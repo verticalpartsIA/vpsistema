@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { ROUTES, navigate, subrota } from '../lib/router'
 import { CATALOGO_INICIAL, SISTEMAS } from '../lib/eventosCatalogo'
 import { Aviso, Carregando, Chip, Vazio } from './eventosUi'
 import RegrasETemplates from './EventosRegras'
@@ -14,18 +15,46 @@ import {
 
 const eventos = () => supabase.schema('eventos')
 
+// Cada aba tem o seu endereço: vpsistema.com/eventos/<slug>
 const TABS = [
-  { id: 'painel',        label: 'Painel Geral',          icon: LayoutDashboard },
-  { id: 'monitor',       label: 'Monitor de Eventos',    icon: Activity },
-  { id: 'catalogo',      label: 'Catálogo de Gatilhos',  icon: ListTree },
-  { id: 'regras',        label: 'Regras de Comunicação', icon: Workflow },
-  { id: 'destinatarios', label: 'Destinatários',         icon: Users },
-  { id: 'canais',        label: 'Canais',                icon: Plug },
-  { id: 'fila',          label: 'Fila de Envios',        icon: Inbox },
-  { id: 'mensagens',     label: 'Mensagens Enviadas',    icon: MessageSquare },
-  { id: 'falhas',        label: 'Falhas e Reenvios',     icon: AlertTriangle },
-  { id: 'auditoria',     label: 'Auditoria',             icon: ShieldCheck },
+  { id: 'painel',        slug: 'painel-geral',          label: 'Painel Geral',          icon: LayoutDashboard },
+  { id: 'monitor',       slug: 'monitor-de-eventos',    label: 'Monitor de Eventos',    icon: Activity },
+  { id: 'catalogo',      slug: 'catalogo-de-gatilhos',  label: 'Catálogo de Gatilhos',  icon: ListTree },
+  { id: 'regras',        slug: 'regras-de-comunicacao', label: 'Regras de Comunicação', icon: Workflow },
+  { id: 'destinatarios', slug: 'destinatarios',         label: 'Destinatários',         icon: Users },
+  { id: 'canais',        slug: 'canais',                label: 'Canais',                icon: Plug },
+  { id: 'fila',          slug: 'fila-de-envios',        label: 'Fila de Envios',        icon: Inbox },
+  { id: 'mensagens',     slug: 'mensagens-enviadas',    label: 'Mensagens Enviadas',    icon: MessageSquare },
+  { id: 'falhas',        slug: 'falhas-e-reenvios',     label: 'Falhas e Reenvios',     icon: AlertTriangle },
+  { id: 'auditoria',     slug: 'auditoria',             label: 'Auditoria',             icon: ShieldCheck },
 ]
+
+// Aba e filtro de sistema lidos do endereço (Voltar/Avançar e link colado funcionam)
+function lerEndereco() {
+  const [slug, sistema] = subrota(ROUTES.eventos)
+  const tab = TABS.find(t => t.slug === slug)
+  return { aba: tab ? tab.id : 'painel', sistema: tab && tab.id === 'catalogo' ? (sistema || '') : '', valido: !!tab }
+}
+
+function useAbaNoEndereco() {
+  const [estado, setEstado] = useState(lerEndereco)
+  useEffect(() => {
+    // /eventos sozinho (ou aba desconhecida) vira /eventos/painel-geral, sem criar entrada no histórico
+    if (!lerEndereco().valido) navigate(`${ROUTES.eventos}/painel-geral`, { replace: true })
+    const sync = () => setEstado(lerEndereco())
+    window.addEventListener('popstate', sync)
+    window.addEventListener('vp:navigate', sync)
+    return () => {
+      window.removeEventListener('popstate', sync)
+      window.removeEventListener('vp:navigate', sync)
+    }
+  }, [])
+  const abrir = useCallback((id, sistema = '') => {
+    const tab = TABS.find(t => t.id === id) || TABS[0]
+    navigate(`${ROUTES.eventos}/${tab.slug}${id === 'catalogo' && sistema ? '/' + encodeURIComponent(sistema) : ''}`)
+  }, [])
+  return [estado, abrir]
+}
 
 const MODO = {
   sombra:     { label: 'Sombra',     cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
@@ -453,11 +482,8 @@ function Auditoria() {
 
 /* ------------------------------------------------------------------ Página */
 export default function Eventos({ onBack }) {
-  const [aba, setAba] = useState('painel')
-  const [sistemaFiltro, setSistemaFiltro] = useState('')
+  const [{ aba, sistema: sistemaFiltro }, abrir] = useAbaNoEndereco()
   const [chave, setChave] = useState(0)
-
-  const abrir = useCallback((id, sistema = '') => { setAba(id); setSistemaFiltro(sistema) }, [])
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
@@ -500,7 +526,7 @@ export default function Eventos({ onBack }) {
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8" key={chave}>
         {aba === 'painel'        && <Painel onAbrir={abrir} />}
         {aba === 'monitor'       && <Monitor />}
-        {aba === 'catalogo'      && <Catalogo sistemaInicial={sistemaFiltro} />}
+        {aba === 'catalogo'      && <Catalogo key={sistemaFiltro} sistemaInicial={sistemaFiltro} />}
         {aba === 'regras'        && <RegrasETemplates />}
         {aba === 'destinatarios' && <Destinatarios />}
         {aba === 'canais'        && <Canais />}

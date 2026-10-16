@@ -9,7 +9,7 @@ import Eventos      from './pages/Eventos'
 import { logActivity } from './lib/activityLog'
 import { watchForNewVersion } from './lib/versionWatch'
 import UpdateToast from './components/UpdateToast'
-import { ROUTES, ADMIN_PATHS, navigate, usePath } from './lib/router'
+import { ROUTES, ADMIN_PATHS, navigate, usePath, rotaBase } from './lib/router'
 import { Loader2 } from 'lucide-react'
 
 // Marca de "esta aba já esteve logada" — só um booleano, some ao fechar a aba.
@@ -149,10 +149,12 @@ function App() {
   // Corrige o endereço na barra (sem criar entrada nova no histórico)
   useEffect(() => {
     if (!target) return
-    if (!user && path !== ROUTES.login) nextPathRef.current = path
+    // guarda o endereço completo (com a aba, ex. /eventos/monitor-de-eventos) para voltar a ele depois do login
+    if (!user && path !== ROUTES.login) nextPathRef.current = window.location.pathname
     if (user) nextPathRef.current = null
     // compara com a barra real: /qualquer (desconhecido) ou /inicio/ também são corrigidos
-    if (target !== window.location.pathname) navigate(target, { replace: true })
+    // só a tela-base é comparada: a aba (/eventos/monitor-de-eventos) é da própria tela
+    if (target !== rotaBase(window.location.pathname) && target !== window.location.pathname) navigate(target, { replace: true })
   }, [target, path, user])
 
   // Auditoria: registra a entrada nas telas de administrador, inclusive
