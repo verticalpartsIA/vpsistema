@@ -187,6 +187,7 @@ function Painel({ onAbrir }) {
   return (
     <div>
       {!banco && AVISO_BANCO}
+      {banco && <InterruptorGeral />}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <Kpi titulo="Eventos hoje"        valor={banco ? dados.eventosHoje : '—'} />
         <Kpi titulo="Envios na fila"      valor={banco ? dados.fila : '—'} />
@@ -383,16 +384,90 @@ function Destinatarios() {
   )
 }
 
-function Canais() {
+// Liga/desliga canais (só administradores gravam; a auditoria é feita pelo banco). Desativado o canal,
+// nada sai por ele: o que estiver na fila não é entregue e novos envios são descartados com o motivo
+// "canal_desativado" (dá para reenviar em Falhas e Reenvios depois de religar).
+async function definirCanais(slugs, ativo) {
+  const { error } = await eventos().from('canais').update({ ativo }).in('slug', slugs)
+  if (error) window.alert('Não foi possível alterar o canal: ' + error.message)
+  return !error
+}
+
+function Interruptor({ ligado, ocupado, onClick, rotulo }) {
   return (
-    <TabelaBanco tabela="canais" select="slug,ativo,limite_por_minuto,intervalo_min_ms"
+    <button type="button" role="switch" aria-checked={ligado} aria-label={rotulo} disabled={ocupado} onClick={onClick}
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${ligado ? 'bg-green-500' : 'bg-slate-600'}`}>
+      <span className={`inline-block h-5 w-5 rounded-full bg-white transition-transform ${ligado ? 'translate-x-5' : 'translate-x-0.5'}`} />
+    </button>
+  )
+}
+
+function Canais() {
+  const [versao, setVersao] = useState(0)
+  const [ocupado, setOcupado] = useState(false)
+  async function alternar(l) {
+    setOcupado(true)
+    await definirCanais([l.slug], !l.ativo)
+    setOcupado(false)
+    setVersao(v => v + 1)
+  }
+  return (
+    <TabelaBanco tabela="canais" select="slug,ativo,limite_por_minuto,intervalo_min_ms" versao={versao}
       vazio="Nenhum canal configurado."
       colunas={[
         { k: 'slug', t: 'Canal' },
-        { k: 'ativo', t: 'Estado', r: l => l.ativo ? 'Ativo' : 'Desativado' },
+        { k: 'ativo', t: 'Estado', r: l => (
+          <span className="flex items-center gap-3">
+            <Interruptor ligado={l.ativo} ocupado={ocupado} rotulo={`Envios pelo canal ${l.slug}`} onClick={() => alternar(l)} />
+            <span className={l.ativo ? 'text-green-400' : 'text-slate-400'}>{l.ativo ? 'Ativo' : 'Desativado'}</span>
+          </span>
+        ) },
         { k: 'limite_por_minuto', t: 'Limite por minuto' },
         { k: 'intervalo_min_ms', t: 'Intervalo mínimo (ms)' },
       ]} />
+  )
+}
+
+// Botão geral do Painel: liga ou pausa todos os canais de uma vez.
+function InterruptorGeral() {
+  const [canais, setCanais] = useState(null)
+  const [ocupado, setOcupado] = useState(false)
+  const carregar = useCallback(async () => {
+    const { data, error } = await eventos().from('canais').select('slug,ativo')
+    setCanais(error ? [] : data ?? [])
+  }, [])
+  useEffect(() => { carregar() }, [carregar])
+
+  if (!canais || !canais.length) return null
+  const ativos = canais.filter(c => c.ativo).length
+  const todos = ativos === canais.length
+  const nenhum = ativos === 0
+
+  async function alternar() {
+    const ligar = !todos
+    const msg = ligar
+      ? 'Ligar os envios por todos os canais?'
+      : 'Pausar os envios por todos os canais? Nada será enviado até religar, e novos envios serão descartados (dá para reenviar depois em Falhas e Reenvios).'
+    if (!window.confirm(msg)) return
+    setOcupado(true)
+    await definirCanais(canais.map(c => c.slug), ligar)
+    await carregar()
+    setOcupado(false)
+  }
+
+  const estado = todos ? { t: 'Ligados', cls: 'text-green-400' }
+    : nenhum ? { t: 'Pausados', cls: 'text-red-400' }
+    : { t: `Parcial (${ativos} de ${canais.length} canais ligados)`, cls: 'text-amber-400' }
+
+  return (
+    <div className="flex items-center justify-between gap-4 bg-surface-card border border-surface-border rounded-2xl p-5 mb-6">
+      <div>
+        <p className="text-slate-500 text-xs uppercase tracking-wider">Envio de mensagens</p>
+        <p className={`text-xl font-semibold mt-1 ${estado.cls}`}>{estado.t}</p>
+        <p className="text-slate-500 text-xs mt-1">Liga ou pausa todos os canais de uma vez. Os eventos continuam sendo registrados.</p>
+      </div>
+      <Interruptor ligado={todos} ocupado={ocupado} rotulo="Envios de mensagens" onClick={alternar} />
+    </div>
   )
 }
 
