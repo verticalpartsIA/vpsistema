@@ -270,16 +270,73 @@ function TabelaBanco({ tabela, select, ordem, colunas, vazio, filtro, versao }) 
 
 const chipStatus = (l) => <Chip cls={STATUS_ENVIO[l.status] ?? STATUS_ENVIO.cancelado}>{l.status}</Chip>
 
+// O que o gi-avisos (VPS) fez com o evento, por destinatário (eventos.entregas_externas).
+// Os avisos do HUB (hub.aviso_fluxo) saem por ele, não pelo worker da Central.
+const SITUACAO_EXTERNA = {
+  enviado:    { label: 'enviado',        cls: 'bg-green-500/10 text-green-400 border-green-500/20' },
+  previsto:   { label: 'previsto',       cls: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
+  agrupado:   { label: 'agrupado',       cls: 'bg-slate-500/10 text-slate-300 border-slate-500/20' },
+  encerrado:  { label: 'encerrado',      cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+  na_fila:    { label: 'fora do horário', cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  autor:      { label: 'é o autor',      cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
+  sem_numero: { label: 'sem WhatsApp',   cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  erro:       { label: 'erro',           cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
+}
+
+// Destinatários informados pelo sistema de origem (nome; o e-mail fica na dica)
+function ParaQuem({ l }) {
+  const lista = Array.isArray(l.destinatarios) && l.destinatarios.length ? l.destinatarios : (l.dono ? [l.dono] : [])
+  if (!lista.length) return <span className="text-slate-500">—</span>
+  return (
+    <div className="flex flex-col gap-0.5">
+      {lista.map((d, i) => <span key={(d.email ?? '') + i} title={d.email ?? ''} className="whitespace-nowrap">{d.nome || d.email}</span>)}
+    </div>
+  )
+}
+
+// Última situação por pessoa
+function NoGiAvisos({ l }) {
+  const ent = Array.isArray(l.entregas_externas) ? l.entregas_externas : []
+  if (!ent.length) return <span className="text-slate-500">—</span>
+  const porPessoa = new Map()
+  for (const e of ent) {
+    const atual = porPessoa.get(e.destinatario_email)
+    if (!atual || new Date(e.em) > new Date(atual.em)) porPessoa.set(e.destinatario_email, e)
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {[...porPessoa.values()].map(e => {
+        const sit = SITUACAO_EXTERNA[e.situacao] ?? { label: e.situacao, cls: STATUS_ENVIO.cancelado }
+        return (
+          <span key={e.destinatario_email} title={`${e.detalhe ?? ''} · ${fmtData(e.em)}`} className="flex items-center gap-2 whitespace-nowrap">
+            <span className="text-slate-400 text-xs">{e.destinatario_nome || e.destinatario_email}</span>
+            <Chip cls={sit.cls}>{sit.label}</Chip>
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
 function Monitor() {
   return (
-    <TabelaBanco tabela="eventos" select="id,tipo,status,recebido_em,entidade_tipo,entidade_id,origens(slug)" ordem="recebido_em"
+    <TabelaBanco tabela="eventos"
+      select="id,tipo,status,recebido_em,entidade_tipo,entidade_id,origens(slug),titulo:payload->>titulo,destinatarios:payload->destinatarios,dono:payload->dono,entregas_externas(destinatario_email,destinatario_nome,situacao,detalhe,em)"
+      ordem="recebido_em"
       vazio="Nenhum evento recebido ainda. Os eventos aparecem aqui assim que um sistema começar a publicar."
       colunas={[
         { k: 'recebido_em', t: 'Recebido', r: l => fmtData(l.recebido_em) },
         { k: 'origem', t: 'Sistema', r: l => SISTEMAS[l.origens?.slug] ?? l.origens?.slug ?? '—' },
-        { k: 'tipo', t: 'Evento', r: l => <code className="text-violet-300 text-xs">{l.tipo}</code> },
+        { k: 'tipo', t: 'Evento', r: l => (
+          <div className="flex flex-col gap-0.5">
+            <code className="text-violet-300 text-xs">{l.tipo}</code>
+            {l.titulo && <span className="text-slate-400 text-xs">{l.titulo}</span>}
+          </div>
+        ) },
         { k: 'entidade', t: 'Entidade', r: l => l.entidade_tipo ? `${l.entidade_tipo} ${l.entidade_id ?? ''}` : '—' },
-        { k: 'status', t: 'Status', r: l => <Chip cls="bg-slate-500/10 text-slate-300 border-slate-500/20">{l.status}</Chip> },
+        { k: 'para', t: 'Para', r: l => <ParaQuem l={l} /> },
+        { k: 'status', t: 'Central', r: l => <Chip cls="bg-slate-500/10 text-slate-300 border-slate-500/20">{l.status}</Chip> },
+        { k: 'giavisos', t: 'WhatsApp (gi-avisos)', r: l => <NoGiAvisos l={l} /> },
       ]} />
   )
 }
