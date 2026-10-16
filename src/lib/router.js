@@ -20,9 +20,29 @@ export const ADMIN_PATHS = [ROUTES.admin, ROUTES.ceo, ROUTES.logs, ROUTES.evento
 
 const KNOWN = Object.values(ROUTES)
 
+// Telas que têm endereço próprio para cada aba (ex.: /eventos/monitor-de-eventos).
+// O App só enxerga a tela-base (/eventos); a aba é lida pela própria tela.
+const COM_SUBROTAS = [ROUTES.eventos]
+
+const normalizar = (p) => String(p || '').replace(/\/+$/, '').toLowerCase() || '/'
+
+// Caminho → tela-base conhecida ('/' se desconhecido)
+export function rotaBase(pathname = window.location.pathname) {
+  const p = normalizar(pathname)
+  if (KNOWN.includes(p)) return p
+  const base = COM_SUBROTAS.find(b => p.startsWith(b + '/'))
+  return base || '/'
+}
+
+// Partes do endereço depois da tela-base: /eventos/catalogo-de-gatilhos/vphub → ['catalogo-de-gatilhos','vphub']
+export function subrota(base, pathname = window.location.pathname) {
+  const p = normalizar(pathname)
+  if (!p.startsWith(base + '/')) return []
+  return p.slice(base.length + 1).split('/').filter(Boolean).map(decodeURIComponent)
+}
+
 function currentPath() {
-  const p = window.location.pathname.replace(/\/+$/, '').toLowerCase() || '/'
-  return KNOWN.includes(p) ? p : '/'
+  return rotaBase()
 }
 
 // Troca o endereço preservando ?query e #hash (links de convite, ?acesso=…)
