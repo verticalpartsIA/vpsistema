@@ -311,6 +311,7 @@ const SITUACAO_EXTERNA = {
   autor:      { label: 'é o autor',      cls: 'bg-slate-500/10 text-slate-400 border-slate-500/20' },
   sem_numero: { label: 'sem WhatsApp',   cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
   pausado:    { label: 'Pausado',        cls: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
+  sem_regra:  { label: 'sem regra',      cls: 'bg-slate-500/10 text-slate-500 border-slate-500/20' },
   erro:       { label: 'erro',           cls: 'bg-red-500/10 text-red-400 border-red-500/20' },
 }
 
