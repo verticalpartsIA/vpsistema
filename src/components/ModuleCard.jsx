@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { getModuleIcon } from '../lib/moduleIcons'
 import { getCardImage } from '../lib/cardImages'
@@ -74,36 +75,84 @@ export default function ModuleCard({ module: mod, locked = false, onClick, index
   )
 }
 
-/** Card do Blog: ouro vivo. As cores se movem e um brilho cruza o card ao passar o mouse. */
+/** Conteúdo do card do Blog. `light` = versão clara, vista só dentro da mancha escura. */
+function GoldContent({ mod, Icon, locked, light }) {
+  return (
+    <div className="relative z-10">
+      <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 shadow-inner
+                      ${light ? 'bg-amber-300' : 'bg-black/80'}`}>
+        <Icon className={`w-6 h-6 ${light ? 'text-[#1c1300]' : 'text-amber-300'}`} strokeWidth={1.75} />
+      </div>
+
+      <h3 className={`font-bold text-base mb-1 ${light ? 'text-[#fff6cf]' : 'text-[#1c1300]'}`}>{mod.name}</h3>
+
+      {mod.description && (
+        <p className={`text-xs leading-relaxed line-clamp-2 ${light ? 'text-amber-100' : 'text-[#3a2900]'}`}>
+          {mod.description}
+        </p>
+      )}
+
+      <div className={`mt-4 flex items-center gap-1 text-xs font-semibold ${light ? 'text-[#fff6cf]' : 'text-[#1c1300]'}`}>
+        {locked ? (
+          <span>Sem permissão</span>
+        ) : (
+          <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+            Abrir sistema <ExternalLink className="w-3 h-3" />
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Card do Blog: ouro vivo. A mancha escura segue o mouse e o amarelo foge para as bordas. */
 function GoldModuleCard({ module: mod, locked, onClick }) {
   const Icon = getModuleIcon(mod.icon)
+  const ref = useRef(null)
+  const pos = useRef({ x: 0, y: 0, tx: 0, ty: 0, raf: 0, init: false })
+
+  // Segue o mouse com atraso (suavização), o que dá o jeito de gota arrastada.
+  const tick = () => {
+    const el = ref.current
+    const p = pos.current
+    if (!el) { p.raf = 0; return }
+    p.x += (p.tx - p.x) * 0.16
+    p.y += (p.ty - p.y) * 0.16
+    el.style.setProperty('--mx', `${p.x}px`)
+    el.style.setProperty('--my', `${p.y}px`)
+    // Para o loop quando a mancha alcança o mouse (não gasta CPU parado).
+    p.raf = Math.abs(p.tx - p.x) + Math.abs(p.ty - p.y) < 0.2 ? 0 : requestAnimationFrame(tick)
+  }
+  const handleMove = (e) => {
+    if (locked || !ref.current) return
+    const r = ref.current.getBoundingClientRect()
+    const p = pos.current
+    p.tx = e.clientX - r.left
+    p.ty = e.clientY - r.top
+    if (!p.init) { p.x = p.tx; p.y = p.ty; p.init = true }
+    if (!p.raf) p.raf = requestAnimationFrame(tick)
+  }
+  const handleLeave = () => {
+    const p = pos.current
+    cancelAnimationFrame(p.raf)
+    p.raf = 0
+    p.init = false
+  }
+  useEffect(() => () => cancelAnimationFrame(pos.current.raf), [])
 
   return (
     <button
+      ref={ref}
       onClick={onClick}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
       className={`vp-gold-card group relative overflow-hidden rounded-2xl p-6 text-left focus:outline-none focus:ring-2 focus:ring-amber-200/70
                   ${locked ? 'vp-gold-card--locked cursor-pointer' : ''}`}
     >
-      <div className="relative z-10">
-        <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-black/80 shadow-inner transition-transform group-hover:scale-110">
-          <Icon className="w-6 h-6 text-amber-300" strokeWidth={1.75} />
-        </div>
-
-        <h3 className="font-bold text-base mb-1 text-[#1c1300]">{mod.name}</h3>
-
-        {mod.description && (
-          <p className="text-xs leading-relaxed line-clamp-2 text-[#3a2900]">{mod.description}</p>
-        )}
-
-        <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-[#1c1300]">
-          {locked ? (
-            <span>Sem permissão</span>
-          ) : (
-            <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-              Abrir sistema <ExternalLink className="w-3 h-3" />
-            </span>
-          )}
-        </div>
+      <GoldContent mod={mod} Icon={Icon} locked={locked} />
+      {/* Cópia clara do texto: só aparece dentro da mancha escura, para continuar legível */}
+      <div aria-hidden="true" className="vp-gold-light absolute inset-0 p-6 pointer-events-none">
+        <GoldContent mod={mod} Icon={Icon} locked={locked} light />
       </div>
     </button>
   )
