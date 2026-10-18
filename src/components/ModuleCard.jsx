@@ -3,6 +3,9 @@ import { getModuleIcon } from '../lib/moduleIcons'
 import { getCardImage } from '../lib/cardImages'
 
 export default function ModuleCard({ module: mod, locked = false, onClick, index = 0 }) {
+  // Card especial do Blog: ouro vivo animado (estilos em index.css, .vp-gold-card)
+  if (mod.slug === 'blog') return <GoldModuleCard module={mod} locked={locked} onClick={onClick} />
+
   const Icon    = getModuleIcon(mod.icon)
   const color   = mod.color || '#F59E0B'
   const bgImage = getCardImage(mod.slug, index)
@@ -66,6 +69,41 @@ export default function ModuleCard({ module: mod, locked = false, onClick, index
           )}
         </div>
 
+      </div>
+    </button>
+  )
+}
+
+/** Card do Blog: ouro vivo. As cores se movem e um brilho cruza o card ao passar o mouse. */
+function GoldModuleCard({ module: mod, locked, onClick }) {
+  const Icon = getModuleIcon(mod.icon)
+
+  return (
+    <button
+      onClick={onClick}
+      className={`vp-gold-card group relative overflow-hidden rounded-2xl p-6 text-left focus:outline-none focus:ring-2 focus:ring-amber-200/70
+                  ${locked ? 'vp-gold-card--locked cursor-pointer' : ''}`}
+    >
+      <div className="relative z-10">
+        <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-4 bg-black/80 shadow-inner transition-transform group-hover:scale-110">
+          <Icon className="w-6 h-6 text-amber-300" strokeWidth={1.75} />
+        </div>
+
+        <h3 className="font-bold text-base mb-1 text-[#1c1300]">{mod.name}</h3>
+
+        {mod.description && (
+          <p className="text-xs leading-relaxed line-clamp-2 text-[#3a2900]">{mod.description}</p>
+        )}
+
+        <div className="mt-4 flex items-center gap-1 text-xs font-semibold text-[#1c1300]">
+          {locked ? (
+            <span>Sem permissão</span>
+          ) : (
+            <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+              Abrir sistema <ExternalLink className="w-3 h-3" />
+            </span>
+          )}
+        </div>
       </div>
     </button>
   )

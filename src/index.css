@@ -17,3 +17,46 @@
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
+
+/* ── Card do Blog: ouro vivo ─────────────────────────────────────────────
+   Em repouso o ouro está parado; ao passar o mouse as cores correm pelo card
+   e um brilho diagonal o atravessa (efeito dos ícones do WordPress). */
+@keyframes vp-gold-flow {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes vp-gold-sheen {
+  0%   { transform: translateX(-130%) skewX(-20deg); }
+  100% { transform: translateX(260%) skewX(-20deg); }
+}
+.vp-gold-card {
+  background: linear-gradient(115deg, #b8860b 0%, #f5c400 18%, #fff0a6 32%, #f5c400 46%, #c99700 62%, #ffe27a 78%, #b8860b 100%);
+  background-size: 200% 100%;
+  box-shadow: 0 0 0 1px rgba(255, 226, 122, 0.55), 0 4px 18px rgba(245, 196, 0, 0.18);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+.vp-gold-card::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  transform: translateX(-130%) skewX(-20deg);
+  pointer-events: none;
+}
+.vp-gold-card:hover {
+  transform: translateY(-0.5rem) scale(1.02);
+  box-shadow: 0 0 0 1px rgba(255, 240, 166, 0.9), 0 18px 40px rgba(245, 196, 0, 0.35);
+  animation: vp-gold-flow 2.2s linear infinite;
+}
+.vp-gold-card:hover::after {
+  animation: vp-gold-sheen 1.1s ease-out;
+}
+.vp-gold-card--locked {
+  opacity: 0.4;
+  filter: saturate(0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-gold-card:hover { animation: none; }
+  .vp-gold-card:hover::after { animation: none; }
+}
