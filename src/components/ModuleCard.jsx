@@ -149,6 +149,8 @@ function GoldModuleCard({ module: mod, locked, onClick }) {
       className={`vp-gold-card group relative overflow-hidden rounded-2xl p-6 text-left focus:outline-none focus:ring-2 focus:ring-amber-200/70
                   ${locked ? 'vp-gold-card--locked cursor-pointer' : ''}`}
     >
+      {/* Marca VerticalParts escondida: só se revela dentro da mancha escura */}
+      <div aria-hidden="true" className="vp-gold-logo absolute pointer-events-none" />
       <GoldContent mod={mod} Icon={Icon} locked={locked} />
       {/* Cópia clara do texto: só aparece dentro da mancha escura, para continuar legível */}
       <div aria-hidden="true" className="vp-gold-light absolute inset-0 p-6 pointer-events-none">
