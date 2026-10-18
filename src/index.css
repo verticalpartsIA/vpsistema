@@ -17,3 +17,48 @@
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
+
+/* ── Card do Blog: ouro vivo ─────────────────────────────────────────────
+   Efeito "gota": onde o mouse passa abre uma mancha ESCURA e o amarelo vai
+   fugindo para as bordas dela (anel claro). A mancha segue o mouse com atraso
+   (posição --mx/--my animada em ModuleCard.jsx) e some ao sair do card. */
+@property --vp-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+.vp-gold-card {
+  --mx: 50%;
+  --my: 50%;
+  --vp-r: 0px;
+  background:
+    radial-gradient(circle var(--vp-r) at var(--mx) var(--my),
+      #1a1100 0%, #3d2a00 24%, #8a6200 52%, #ffd93b 80%, #fff3b0 92%, rgba(255, 243, 176, 0) 100%),
+    linear-gradient(135deg, #e9b500 0%, #f5c400 45%, #ffd93b 100%);
+  box-shadow: 0 0 0 1px rgba(255, 226, 122, 0.55), 0 4px 18px rgba(245, 196, 0, 0.18);
+  transition: --vp-r 0.55s cubic-bezier(0.2, 0.9, 0.2, 1), transform 0.3s ease, box-shadow 0.3s ease;
+}
+.vp-gold-card:hover {
+  --vp-r: 150px;
+  transform: translateY(-0.5rem) scale(1.02);
+  box-shadow: 0 0 0 1px rgba(255, 240, 166, 0.9), 0 18px 40px rgba(245, 196, 0, 0.35);
+}
+.vp-gold-logo {
+  inset: 0;
+  /* Marca grande à direita, cortada pela borda; a máscara usa a mesma posição do mouse do card. */
+  background: url('/images/vp-logo-mark-yellow.png') right -14px center / auto 135% no-repeat;
+  -webkit-mask-image: radial-gradient(circle calc(var(--vp-r) * 0.68) at var(--mx) var(--my), #000 40%, transparent 100%);
+  mask-image: radial-gradient(circle calc(var(--vp-r) * 0.68) at var(--mx) var(--my), #000 40%, transparent 100%);
+}
+.vp-gold-light {
+  -webkit-mask-image: radial-gradient(circle calc(var(--vp-r) * 0.7) at var(--mx) var(--my), #000 45%, transparent 100%);
+  mask-image: radial-gradient(circle calc(var(--vp-r) * 0.7) at var(--mx) var(--my), #000 45%, transparent 100%);
+}
+.vp-gold-card--locked {
+  opacity: 0.4;
+  filter: saturate(0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-gold-card { transition: none; }
+  .vp-gold-card:hover { --vp-r: 0px; transform: none; }
+}
