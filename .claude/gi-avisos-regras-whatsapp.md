@@ -34,6 +34,9 @@ Configurada no arquivo `janela.json` do gi-avisos, relido a cada varredura (muda
 - Feriados: só o calendário de Guarulhos/SP (nacionais + 09/07 estadual + Corpus Christi e 08/12 municipais), 2026–2027,
   na lista `feriados` do `janela.json` (lugar único e editável). Pontos facultativos (Carnaval, vésperas, emendas) não
   bloqueiam. Feriado na China não bloqueia envio.
+- Fonte única futura: o gi-avisos já sabe ler os feriados da tabela `calendario_feriados` do HUB (mesma fonte do
+  motor de prazos), atrás do interruptor `feriados_hub.ativo` no `janela.json`, hoje **desligado**. Ligado, qualquer
+  falha de leitura (tabela, permissão, lista vazia, data inválida) mantém a lista do `janela.json`.
 - Interruptor: `"ativa": false` no `janela.json` desliga as janelas (envia a qualquer hora). Arquivo ausente ou
   inválido volta ao padrão.
 
@@ -76,6 +79,9 @@ Pedidos de assinatura nunca são pausados.
 - Exceções de horário para aval do CEO e assinaturas: em avaliação (hoje seguem a janela padrão).
 - Prazos que pulam feriados (Guarulhos para os internos; China para as 48 h do fornecedor): é do HUB, que calcula os
   prazos. O gi-avisos só usa o prazo que recebe.
+- Para ligar a leitura dos feriados do HUB: a tabela `calendario_feriados` existe (desde 19/10) mas com outro formato
+  (sem `escopo`/`bloqueia_envio`, com Carnaval e 25/01 da cidade de SP, sem 08/12 de Guarulhos) e só é legível por
+  usuário logado. Falta o HUB alinhar conteúdo, colunas e uma permissão de leitura para a chave pública.
 
 ## Histórico
 | Data | Mudança |
@@ -83,3 +89,4 @@ Pedidos de assinatura nunca são pausados.
 | 22/10/2026 | gi-avisos versionado em git local; decisões (`decisao_tipo`) deixam de ser agrupadas |
 | 23/10/2026 | montador externo por telefone; `ci-envio-`/`ci-assinado-`/`ci-lembrete-` sem agrupamento; prefixo "Lembrete:"; ADM do Comercial nas etapas comerciais; janela configurável com Financeiro/Precificação 09:30–17:30 |
 | 24/10/2026 | feriados de Guarulhos/SP (nacionais + 09/07 + Corpus Christi + 08/12) no `janela.json` |
+| 24/10/2026 | leitura dos feriados da tabela do HUB preparada (desligada) |
