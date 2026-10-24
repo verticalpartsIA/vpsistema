@@ -1,6 +1,6 @@
 # gi-avisos — regras dos avisos de WhatsApp do fluxo (VP Gestão)
 
-> Documento de referência para as sessões do Claude e para a equipe. Atualizado em 23/10/2026.
+> Documento de referência para as sessões do Claude e para a equipe. Atualizado em 24/10/2026.
 > Este repositório é público: aqui não vão telefones, e-mails pessoais, chaves nem detalhes de acesso.
 
 ## O que é
@@ -31,7 +31,9 @@ Configurada no arquivo `janela.json` do gi-avisos, relido a cada varredura (muda
   18:00 de sexta sai na segunda às 09:30). Se o assunto for resolvido no HUB enquanto espera, o aviso não sai.
 - **Prazos x envio são calendários separados:** os prazos (SLA) são calculados pelo HUB; a janela acima só decide
   quando a mensagem sai.
-- Feriados: lista nacional (+20/11) até 2027 no próprio gi-avisos. Feriados municipais não estão incluídos.
+- Feriados: só o calendário de Guarulhos/SP (nacionais + 09/07 estadual + Corpus Christi e 08/12 municipais), 2026–2027,
+  na lista `feriados` do `janela.json` (lugar único e editável). Pontos facultativos (Carnaval, vésperas, emendas) não
+  bloqueiam. Feriado na China não bloqueia envio.
 - Interruptor: `"ativa": false` no `janela.json` desliga as janelas (envia a qualquer hora). Arquivo ausente ou
   inválido volta ao padrão.
 
@@ -72,9 +74,12 @@ Pedidos de assinatura nunca são pausados.
 - `clientes.criado_por` vazio no HUB: o aviso de "Cliente cadastrado" sai sem o nome do vendedor até o app gravar quem cadastrou.
 - Entregas a destinatários sem e-mail (montadores) não aparecem em `eventos.entregas_externas`.
 - Exceções de horário para aval do CEO e assinaturas: em avaliação (hoje seguem a janela padrão).
+- Prazos que pulam feriados (Guarulhos para os internos; China para as 48 h do fornecedor): é do HUB, que calcula os
+  prazos. O gi-avisos só usa o prazo que recebe.
 
 ## Histórico
 | Data | Mudança |
 |---|---|
 | 22/10/2026 | gi-avisos versionado em git local; decisões (`decisao_tipo`) deixam de ser agrupadas |
 | 23/10/2026 | montador externo por telefone; `ci-envio-`/`ci-assinado-`/`ci-lembrete-` sem agrupamento; prefixo "Lembrete:"; ADM do Comercial nas etapas comerciais; janela configurável com Financeiro/Precificação 09:30–17:30 |
+| 24/10/2026 | feriados de Guarulhos/SP (nacionais + 09/07 + Corpus Christi + 08/12) no `janela.json` |
