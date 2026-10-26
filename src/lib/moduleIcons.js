@@ -16,6 +16,7 @@ import {
   FileSignature,
   Users,
   BrainCircuit,
+  BookOpen,
   ExternalLink,
 } from 'lucide-react'
 
@@ -32,6 +33,7 @@ export const MODULE_ICONS = {
   FileSignature,
   Users,
   BrainCircuit, // VP HUB (cotacao-importacao) — cérebro com ligações, estilo grafo
+  BookOpen, // Blog (documentação e novidades do ecossistema)
 }
 
 /** Retorna o componente de ícone pelo nome (string vinda do banco).
