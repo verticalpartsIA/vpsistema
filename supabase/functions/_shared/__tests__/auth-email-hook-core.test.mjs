@@ -34,6 +34,22 @@ test('aceita assinatura válida', async () => {
   assert.equal(ok, true)
 })
 
+test('aceita secret no formato documentado "v1,whsec_<base64>"', async () => {
+  const secretB64 = toBase64(crypto.getRandomValues(new Uint8Array(32)))
+  const secret = `v1,whsec_${secretB64}`
+  const id = 'msg_v1'
+  const now = Date.now()
+  const timestamp = String(Math.floor(now / 1000))
+  const body = '{"type":"invite"}'
+  const sig = await sign(secretB64, id, timestamp, body)
+
+  const ok = await verifySendEmailHookSignature(
+    { 'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': `v1,${sig}` },
+    body, secret, now,
+  )
+  assert.equal(ok, true)
+})
+
 test('rejeita assinatura errada', async () => {
   const secret = `whsec_${toBase64(crypto.getRandomValues(new Uint8Array(32)))}`
   const ok = await verifySendEmailHookSignature(

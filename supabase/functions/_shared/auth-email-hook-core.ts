@@ -49,9 +49,12 @@ export async function verifySendEmailHookSignature(
   const ts = Number(timestamp)
   if (!Number.isFinite(ts) || Math.abs(now / 1000 - ts) > toleranceSeconds) return false
 
+  // Formato documentado do Supabase: "v1,whsec_<base64>" — o prefixo de versão ("v1,") vem
+  // ANTES do "whsec_", não é opcional (achado do Codex, PR #83: stripar só "whsec_" deixava o
+  // "v1," sobrando e quebrava o atob, rejeitando toda chamada do hook).
   let secretBytes: Uint8Array
   try {
-    secretBytes = base64ToBytes(secret.replace(/^whsec_/, ''))
+    secretBytes = base64ToBytes(secret.replace(/^v\d+,/, '').replace(/^whsec_/, ''))
   } catch {
     return false
   }

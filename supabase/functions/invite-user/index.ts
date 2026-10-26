@@ -150,6 +150,17 @@ Deno.serve(async (req) => {
         if (signOutError) {
           console.error('invite-user: signOut global (resend) falhou:', signOutError.message)
         }
+
+        // Reaproveita "Reenviar credenciais" como caminho de recuperação se uma ativação de 2FA
+        // anterior tiver falhado (ver achado abaixo): idempotente, e two_factor_activate não
+        // mexe em contas isentas (two_factor_exempt), então é seguro chamar sempre no resend.
+        const { error: reactivateError } = await supabaseAdmin.rpc('two_factor_activate', { p_user: existing.id })
+        if (reactivateError) {
+          console.error('invite-user: two_factor_activate (resend) falhou:', reactivateError.message)
+          return new Response(JSON.stringify({ error: `Senha redefinida, mas não foi possível confirmar o 2FA: ${reactivateError.message}. Tente "Reenviar credenciais" de novo antes de informar a senha ao colaborador.` }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          })
+        }
       } else if (alreadyExists) {
         return new Response(JSON.stringify({ error: mainError.message, already_exists: true }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -174,7 +185,14 @@ Deno.serve(async (req) => {
       await supabaseAdmin.from('profiles').update({ celular_corporativo: celularDigits }).eq('id', mainUser.id)
       const { error: activateError } = await supabaseAdmin.rpc('two_factor_activate', { p_user: mainUser.id })
       if (activateError) {
+        // Achado de segurança (Codex, PR #83): se o 2FA não ativar, a conta cai no caminho
+        // "legacy" do login (signInWithPassword direto, sem WhatsApp) — exatamente o furo que
+        // esta PR fecha. Nunca reportar o convite como sucesso nesse caso; a conta já criada
+        // fica pendente e é corrigida pedindo "Reenviar credenciais" (que tenta ativar de novo).
         console.error('invite-user: two_factor_activate falhou:', activateError.message)
+        return new Response(JSON.stringify({ error: `Conta criada, mas não foi possível ativar o 2FA: ${activateError.message}. Use "Reenviar credenciais" para tentar de novo antes de informar a senha ao colaborador.` }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
       }
     }
 
