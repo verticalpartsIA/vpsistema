@@ -50,6 +50,14 @@ mexe em infraestrutura compartilhada de produção — não como uma feature iso
 - Repositório: `verticalpartsIA/vpsistema`, branch de produção `main`.
 - Hospedado na Hostinger como app Node.js (runtime configurado para Node 22.x), framework Vite.
 
+**Diagnóstico de falha de SSO num satélite**: antes de suspeitar de bug no vpsistema, confira
+`activity_events` (`app = <satélite>`, `event_type = 'enter'`). Esse registro só é gravado depois
+que o `sso-proxy` passa pelas checagens de permissão e gera o link — se ele está aparecendo a cada
+tentativa, o vpsistema já fez a parte dele corretamente, e a causa está no app satélite (sessão,
+build com cache velho, CDN, etc.), em outro repositório. Caso real: Carolina não conseguia entrar
+no VP Click em 23/10/2026 — ~30 tentativas de SSO naquele dia, todas processadas com sucesso pelo
+vpsistema; a causa está no lado do VP Click (repo `005_vpclick`), não aqui.
+
 ## 2. Stack técnico (não mude sem necessidade — e nunca sem avisar)
 
 - **Frontend**: React 19 + Vite 8 + Tailwind 3 (paleta `brand`/`surface`, fontes Montserrat/Inter) +
