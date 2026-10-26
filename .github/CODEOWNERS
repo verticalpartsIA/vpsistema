@@ -1,0 +1,6 @@
+# CODEOWNERS — exige revisão humana para mudar a constituição do projeto.
+# A branch protection da main já exige 1 aprovação para qualquer PR (necessariamente do
+# gelsonsimoes, já que a verticalpartsIA não pode aprovar os próprios PRs). Esta linha só
+# deixa explícito, pra quem olhar o repositório, qual é o motivo: o CLAUDE.md é a
+# constituição do vpsistema e precisa da revisão dele especificamente.
+/CLAUDE.md @gelsonsimoes
