@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "montserrat",
+        "createdAt": "2026-10-26T17:25:11.984Z",
+        "reason": "fonte de marca pré-existente do vpsistema, documentada em CLAUDE.md (fontes Montserrat/Inter); não introduzida nem alterada nesta sessão, que tratou de recuperação de senha/2FA"
+      }
+    ]
+  }
+}
