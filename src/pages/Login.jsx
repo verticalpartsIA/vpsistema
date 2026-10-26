@@ -94,31 +94,31 @@ function Field({ label, type = 'text', value, onChange, placeholder, required, i
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
-export default function Login({ forceMode = null, onResetDone = null, onExpiredDismiss = null, notice = null }) {
+export default function Login({ notice = null }) {
   const [email,        setEmail]        = useState('')
   const [password,     setPassword]     = useState('')
   const [showPass,     setShowPass]     = useState(false)
   const [loading,      setLoading]      = useState(false)
   const [error,        setError]        = useState('')
-  const [mode,         setMode]         = useState(forceMode || 'login')
+  const [mode,         setMode]         = useState('login')
   // 2º fator: código enviado por WhatsApp depois de e-mail + senha corretos.
   const [tfChallenge,  setTfChallenge]  = useState(null)   // { challengeId, phoneHint }
   const [tfCode,       setTfCode]       = useState('')
   const [tfLoading,    setTfLoading]    = useState(false)
   const [tfCooldown,   setTfCooldown]   = useState(0)
+  // Recuperação de senha com 2FA (specs/001-recuperacao-senha-2fa): dois códigos de 6 dígitos —
+  // e-mail e WhatsApp — confirmados juntos, nunca um link com token na URL.
   const [resetSent,    setResetSent]    = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
-  const [otpCode,      setOtpCode]      = useState('')
-  const [otpLoading,   setOtpLoading]   = useState(false)
+  const [challengeId,  setChallengeId]  = useState(null)
+  const [emailCode,    setEmailCode]    = useState('')
+  const [whatsappCode, setWhatsappCode] = useState('')
+  const [confirmLoading, setConfirmLoading] = useState(false)
   const [newPassword,  setNewPassword]  = useState('')
   const [confirmPass,  setConfirmPass]  = useState('')
   const [showNewPass,  setShowNewPass]  = useState(false)
   const [showConfirm,  setShowConfirm]  = useState(false)
   const [resetDone,    setResetDone]    = useState(false)
-
-  useEffect(() => {
-    if (forceMode) setMode(forceMode)
-  }, [forceMode])
 
   // Contagem regressiva do "Reenviar código".
   useEffect(() => {
@@ -163,20 +163,27 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
 
   async function handleSetNewPassword(e) {
     e.preventDefault()
-    if (newPassword.length < 6) { setError('A senha deve ter pelo menos 6 caracteres.'); return }
+    if (newPassword.length < 8) { setError('A senha deve ter pelo menos 8 caracteres.'); return }
     if (newPassword !== confirmPass) { setError('As senhas não coincidem. Verifique e tente novamente.'); return }
     setError('')
     setResetLoading(true)
-    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+    const { data, error: fnError } = await supabase.functions.invoke('reset-complete', {
+      body: { challenge_id: challengeId, new_password: newPassword },
+    })
+    let payload = data
+    if (fnError && !payload) { try { payload = await fnError.context.json() } catch { /* sem corpo */ } }
     setResetLoading(false)
-    if (updateError) { setError('Não foi possível redefinir a senha. Tente solicitar um novo link.'); return }
+    if (!payload?.ok) { setError(payload?.error || 'Não foi possível redefinir a senha. Peça um novo link de recuperação.'); return }
     setResetDone(true)
     setTimeout(() => {
       setResetDone(false)
       setNewPassword('')
       setConfirmPass('')
-      if (onResetDone) onResetDone()
-      else setMode('login')
+      setChallengeId(null)
+      setEmailCode('')
+      setWhatsappCode('')
+      setResetSent(false)
+      setMode('login')
     }, 2500)
   }
 
@@ -218,42 +225,48 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
     setLoading(false)
   }
 
-  async function handleVerifyOtp(e) {
-    e.preventDefault()
-    setError('')
-    setOtpLoading(true)
-    const { error: otpError } = await supabase.auth.verifyOtp({
-      email,
-      token: otpCode.trim(),
-      type: 'recovery',
-    })
-    setOtpLoading(false)
-    if (otpError) {
-      setError('Código inválido ou expirado. Solicite um novo código.')
-      return
-    }
-    // onAuthStateChange('PASSWORD_RECOVERY') dispara em App.jsx → mostra formulário de reset
-  }
-
+  // Passo 1 da recuperação: pede os dois códigos (e-mail + WhatsApp). Resposta sempre genérica —
+  // nunca revela se o e-mail existe nem se falta celular (reset-start, specs/001-recuperacao-senha-2fa).
   async function handleForgotPassword(e) {
     e.preventDefault()
     setError('')
     setResetLoading(true)
-    const { data, error: invokeError } = await supabase.functions.invoke('send-recovery-email', {
+    const { data, error: invokeError } = await supabase.functions.invoke('reset-start', {
       body: { email },
     })
     setResetLoading(false)
-    const resetError = invokeError || data?.error
-    if (resetError) {
-      const msg = typeof resetError === 'string' ? resetError : (resetError.message || '')
-      if (msg.toLowerCase().includes('rate limit') || resetError.status === 429) {
-        setError('Muitas solicitações em pouco tempo. Aguarde alguns minutos e tente novamente.')
-      } else {
-        setError('Não foi possível enviar o e-mail. Tente novamente em instantes.')
-      }
+    let payload = data
+    if (invokeError && !payload) { try { payload = await invokeError.context.json() } catch { /* sem corpo */ } }
+    if (!payload?.challenge_id) {
+      setError('Não foi possível enviar o código. Tente novamente em instantes.')
       return
     }
+    setChallengeId(payload.challenge_id)
     setResetSent(true)
+  }
+
+  // Passo 2: confirma os dois códigos juntos. Só libera a troca de senha quando os dois batem.
+  async function handleConfirmCodes(e) {
+    e.preventDefault()
+    setError('')
+    setConfirmLoading(true)
+    const [emailRes, waRes] = await Promise.all([
+      supabase.functions.invoke('reset-confirm-email', { body: { challenge_id: challengeId, code: emailCode } }),
+      supabase.functions.invoke('reset-confirm-whatsapp', { body: { challenge_id: challengeId, code: whatsappCode } }),
+    ])
+    setConfirmLoading(false)
+
+    async function readError({ data, error }) {
+      if (data?.ok) return null
+      let payload = data
+      if (error && !payload) { try { payload = await error.context.json() } catch { /* sem corpo */ } }
+      return payload?.error || 'Código inválido ou expirado. Peça um novo link de recuperação.'
+    }
+    const emailErr = await readError(emailRes)
+    const waErr = await readError(waRes)
+    if (emailErr || waErr) { setError(emailErr || waErr); return }
+
+    setMode('reset')
   }
 
   // ── Helpers de UI ────────────────────────────────────────────────────────
@@ -380,35 +393,43 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
           <p className="mb-1 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand before:h-0.5 before:w-5 before:bg-brand before:content-['']">
             Recuperar acesso
           </p>
-          <h2 className="text-3xl font-extrabold tracking-tight text-black">Digite o código</h2>
+          <h2 className="text-3xl font-extrabold tracking-tight text-black">Digite os dois códigos</h2>
           <p className="mt-2 text-sm text-neutral-500">
-            Enviamos um código de 6 dígitos para{' '}
-            <span className="font-semibold text-black">{email}</span>.
-            Verifique sua caixa de entrada e cole o código abaixo.
+            Se <span className="font-semibold text-black">{email}</span> estiver cadastrado, você vai
+            receber um código por e-mail e outro por WhatsApp. Os dois são necessários pra trocar a senha.
           </p>
         </div>
-        <form onSubmit={handleVerifyOtp} className="space-y-4">
+        <form onSubmit={handleConfirmCodes} className="space-y-4">
           <Field
-            label="Código de recuperação"
+            label="Código do e-mail"
             type="text"
-            value={otpCode}
-            onChange={e => setOtpCode(e.target.value)}
-            placeholder="ex: abc123"
+            value={emailCode}
+            onChange={e => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000"
+            required
+            icon={<Mail className="h-4 w-4" />}
+          />
+          <Field
+            label="Código do WhatsApp"
+            type="text"
+            value={whatsappCode}
+            onChange={e => setWhatsappCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000"
             required
             icon={<CheckCircle className="h-4 w-4" />}
           />
           <ErrorBox />
-          <SubmitBtn disabled={otpLoading || otpCode.trim().length < 4}>
-            {otpLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verificando...</> : 'Confirmar código →'}
+          <SubmitBtn disabled={confirmLoading || emailCode.length !== 6 || whatsappCode.length !== 6}>
+            {confirmLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Confirmando...</> : 'Confirmar códigos →'}
           </SubmitBtn>
           <div className="text-center space-y-2">
             <button type="button"
-              onClick={() => { setResetSent(false); setOtpCode(''); setError('') }}
+              onClick={() => { setResetSent(false); setEmailCode(''); setWhatsappCode(''); setChallengeId(null); setError('') }}
               className="block w-full text-xs font-semibold text-neutral-500 transition-colors hover:text-brand">
-              Reenviar código
+              Pedir novos códigos
             </button>
             <button type="button"
-              onClick={() => { setMode('login'); setResetSent(false); setOtpCode(''); setError('') }}
+              onClick={() => { setMode('login'); setResetSent(false); setEmailCode(''); setWhatsappCode(''); setChallengeId(null); setError('') }}
               className="text-xs font-semibold text-neutral-500 transition-colors hover:text-black">
               ← Voltar para o login
             </button>
@@ -423,7 +444,8 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight text-black">Esqueceu a senha?</h2>
           <p className="mt-2 text-sm text-neutral-500">
-            Informe o e-mail cadastrado e enviaremos um link para redefinir sua senha.
+            Informe o e-mail cadastrado. Se a conta existir e tiver celular cadastrado, você vai
+            receber um código por e-mail e outro por WhatsApp.
           </p>
         </div>
         <form onSubmit={handleForgotPassword} className="space-y-4">
@@ -431,7 +453,7 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
             placeholder="seu@verticalparts.com.br" required icon={<Mail className="h-4 w-4" />} />
           <ErrorBox />
           <SubmitBtn disabled={resetLoading}>
-            {resetLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Enviando...</> : 'Enviar link de redefinição →'}
+            {resetLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Enviando...</> : 'Enviar códigos →'}
           </SubmitBtn>
           <BackToLogin />
         </form>
@@ -459,7 +481,7 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
         </div>
         <form onSubmit={handleSetNewPassword} className="space-y-4">
           <Field label="Nova senha" type={showNewPass ? 'text' : 'password'} value={newPassword}
-            onChange={e => setNewPassword(e.target.value)} placeholder="mínimo 6 caracteres" required
+            onChange={e => setNewPassword(e.target.value)} placeholder="mínimo 8 caracteres" required
             icon={<Lock className="h-4 w-4" />}
             rightSlot={<EyeBtn show={showNewPass} onToggle={() => setShowNewPass(v => !v)} />} />
           <Field label="Confirmar nova senha" type={showConfirm ? 'text' : 'password'} value={confirmPass}
@@ -471,32 +493,6 @@ export default function Login({ forceMode = null, onResetDone = null, onExpiredD
             {resetLoading ? <><Loader2 className="h-4 w-4 animate-spin" /> Salvando...</> : 'Salvar nova senha →'}
           </SubmitBtn>
         </form>
-      </>
-    ),
-
-    expired: (
-      <>
-        <div className="mb-8">
-          <p className="mb-1 inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-brand before:h-0.5 before:w-5 before:bg-brand before:content-['']">
-            Link expirado
-          </p>
-          <h2 className="text-3xl font-extrabold tracking-tight text-black">Link inválido</h2>
-          <p className="mt-2 text-sm text-neutral-500">
-            O link de recuperação expirou ou já foi utilizado. Solicite um novo.
-          </p>
-        </div>
-        <button onClick={() => { setMode('forgot'); setError(''); setResetSent(false); if (onExpiredDismiss) onExpiredDismiss() }}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand py-3
-                     text-sm font-bold text-black shadow-lg shadow-brand/30
-                     transition-colors hover:bg-brand-dark">
-          Solicitar novo link →
-        </button>
-        <div className="mt-4 text-center">
-          <button onClick={() => { setMode('login'); if (onExpiredDismiss) onExpiredDismiss() }}
-            className="text-xs font-semibold text-neutral-500 transition-colors hover:text-black">
-            ← Voltar ao login
-          </button>
-        </div>
       </>
     ),
   }

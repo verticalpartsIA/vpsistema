@@ -3,6 +3,15 @@
 Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra impacto zero (decisão
 `/clarify` P4).
 
+## Status (26/10/2026)
+
+Código de T001-T015 escrito e commitado (migration, 6 edge functions, `Login.jsx`/`App.jsx`/
+`Admin.jsx`). `npm run build` passa; os 5 testes novos de `auth-email-hook-core` passam, junto
+com os 16 testes já existentes do repo (21 no total). **Nada foi aplicado em produção** — nem a
+migration, nem o deploy das edge functions, nem a ativação dos hooks no painel. T016 (checklist
+de verificação manual) só pode rodar depois do deploy real, com o Gelson — não é algo que esta
+sessão consiga validar sozinha. Ordem de publicação: ver seção "Risco e rollback" do `plan.md`.
+
 ## Fase 1 — Schema/Migração
 
 - **T001**: Criar migration `YYYYMMDDHHMMSS_recuperacao_senha_2fa.sql` com comentário de "porquê"
@@ -39,6 +48,11 @@ Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra im
   *Verificação*: com um token de teste com claim desatualizada, um `select`/`update` numa dessas
   tabelas falha; com claim atual ou ausente, funciona normalmente.
 
+- **T006b**: Na mesma migration (ou numa nova, à escolha de quem implementar — mas sempre com o
+  comentário de "porquê"), criar a tabela `auth_email_hook_log` (ver `data-model.md`), RLS ligado
+  sem policy, só `service_role`.
+  *Verificação*: `insert`/`select` como `service_role` funciona; `anon`/`authenticated` falham.
+
 ## Fase 2 — Edge Functions
 
 - **T007**: Criar `supabase/functions/reset-start/index.ts` (`verify_jwt: false`). Chama
@@ -62,12 +76,13 @@ Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra im
   *Verificação*: senha com menos de 8 caracteres é recusada; fluxo completo com 8+ troca a senha;
   tentar usar o mesmo `challenge_id` de novo falha (`used_at` já preenchido); login com a senha
   antiga falha, com a nova funciona.
-- **T010**: Alterar `supabase/functions/invite-user/index.ts`: validar celular cadastrado antes de
-  convidar (FR08); trocar o envio do convite nativo do Supabase por um desafio
-  `credential_challenges` com `purpose='invite'`, reaproveitando `reset-confirm-*`/`reset-complete`
-  (ou duplicando a validação de purpose, decisão de implementação).
+- **T010** (desenho revisto no `/implement` — ver `plan.md`): alterar
+  `supabase/functions/invite-user/index.ts`: validar celular cadastrado antes de convidar (sem
+  celular, `two_factor_activate` deixaria a conta sem conseguir logar); logo após criar o usuário
+  (ou redefinir, no caminho `resend`), chamar `two_factor_activate(user_id)` — reaproveita o
+  mecanismo de 2FA do login já existente em vez de duplicar um desafio novo.
   *Verificação*: convidar sem celular cadastrado é barrado com mensagem clara; convidar com
-  celular dispara os dois códigos e o fluxo de "definir senha" funciona ponta a ponta.
+  celular, o primeiro login do convidado já pede e-mail+senha+código do WhatsApp.
 - **T010b** (achado 1 do `/analyze`): no mesmo arquivo, no caminho `resend: true` (reenviar
   credenciais de alguém que já tem conta — não passa pelo desafio de dois fatores, é um admin
   autenticado agindo, não a própria pessoa provando identidade), gravar
@@ -79,6 +94,13 @@ Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra im
   estiverem validadas em produção** (ordem de publicação do `plan.md`, passo 5).
   *Verificação*: chamada à function antiga retorna 410 e nenhum fluxo do frontend depende mais
   dela.
+- **T011b** (decisão: incluir o Send Email Hook): criar `supabase/functions/auth-email-hook/index.ts`
+  — confere a assinatura do payload com `SEND_EMAIL_HOOK_SECRET`, grava em
+  `auth_email_hook_log`, devolve sucesso sem enviar nada. Ativar manualmente no painel
+  (Authentication → Hooks → Send Email) **só no passo 6 do rollout**, junto com o Custom Access
+  Token Hook.
+  *Verificação*: com o hook ativo, tentar "Send recovery email" pelo painel do Supabase não
+  entrega e-mail nenhum, e aparece uma linha nova em `auth_email_hook_log`.
 
 ## Fase 3 — Frontend
 
@@ -88,9 +110,9 @@ Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra im
   fluxo.
   *Verificação*: `npm run dev`, fluxo completo no navegador, incluindo os casos de código errado
   e conta sem celular (mensagem genérica, sem revelar nada).
-- **T013**: Criar o modo "definir senha" (convite e recuperação) parametrizado por
-  `?challenge=...` na query string (nunca hash) — pode reaproveitar o `mode: 'reset'` existente
-  do `Login.jsx` trocando a origem do estado (de hash pra query param).
+- **T013**: Criar o modo "definir senha" (só recuperação — convite não precisa mais, ver T010)
+  parametrizado por `?challenge=...` na query string (nunca hash) — pode reaproveitar o
+  `mode: 'reset'` existente do `Login.jsx` trocando a origem do estado (de hash pra query param).
   *Verificação*: abrir a URL com um `challenge_id` de teste mostra a tela certa; sem parâmetro,
   cai no login normal.
 - **T014**: Remover de `src/App.jsx` toda a detecção de `type=invite`/`type=recovery` no hash e os
@@ -112,7 +134,10 @@ Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra im
   - [ ] Login normal com 2FA sem regressão.
   - [ ] Recuperação ponta a ponta com celular cadastrado.
   - [ ] Recuperação de conta sem celular: nenhum código enviado, mensagem genérica.
-  - [ ] Convite ponta a ponta com celular cadastrado.
+  - [ ] Convite ponta a ponta com celular cadastrado: primeiro login do convidado já pede o
+    código de WhatsApp (2FA ativo desde a criação).
   - [ ] Convite barrado para quem não tem celular.
   - [ ] Sessão aberta em outro dispositivo cai de fato após reset (próprio usuário e via admin).
   - [ ] Ativação do hook/RLS (passo 6 do rollout) não desloga ninguém só pelo deploy.
+  - [ ] Depois de ativar o Send Email Hook: "Send recovery email" pelo painel do Supabase não
+    entrega nada, e fica registrado em `auth_email_hook_log`.

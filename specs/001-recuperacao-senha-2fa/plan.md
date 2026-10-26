@@ -14,10 +14,12 @@ disso, os dois fluxos usam uma máquina de desafio própria (`credential_challen
 URL. Sem token na URL, não há o que o `detectSessionInUrl` possa capturar — o P2 deixa de ter
 onde acontecer, em vez de ser bloqueado na corrida.
 
-Isso também simplifica em relação à PR #49: não precisa mais do hook `auth-email-hook` pra
-descartar e-mails nativos do Supabase, porque o fluxo novo nunca aciona o e-mail nativo de
-recuperação/convite — o e-mail do código de 6 dígitos é disparado pelo próprio projeto, pelo
-mesmo canal SMTP já usado nos templates de boas-vindas.
+O fluxo novo em si nunca aciona o e-mail nativo de recuperação/convite — o e-mail do código de 6
+dígitos é disparado pelo próprio projeto, pelo mesmo canal SMTP já usado nos templates de
+boas-vindas. Mas isso não fecha um caminho residual: alguém com acesso ao painel do Supabase
+ainda pode clicar em "Send recovery email" ali, disparando o e-mail nativo do Supabase (com link
+de sessão na URL) por fora de toda esta proteção. Por decisão explícita, este plano **inclui** o
+`auth-email-hook` da PR #49 pra fechar esse resíduo — ver "Send Email Hook" abaixo.
 
 ## Frontend
 
@@ -56,12 +58,32 @@ mesmo canal SMTP já usado nos templates de boas-vindas.
   `profiles.pwd_changed_at = now()`, chama `auth.admin.signOut(user_id, 'global')` (revoga
   refresh tokens na hora), marca o desafio como usado, registra `activity_logs` (`password_reset`).
   **Não abre sessão** — FR07 exige login normal depois.
-- **`invite-user`** (existente, alterado): passa a exigir celular cadastrado antes de permitir o
-  convite (FR08) — validação adicional, erro claro se faltar. A conclusão do convite deixa de
-  depender do link mágico nativo do Supabase: usa o mesmo `credential_challenges` com
-  `purpose='invite'`.
+- **`invite-user`** (existente, alterado) — **desenho revisto durante o `/implement`**: a
+  investigação do código real mostrou que `invite-user` **já não usa link mágico nenhum** — cria
+  a conta direto com uma senha escolhida pelo admin e manda por e-mail em texto puro. E
+  `two_factor_config.default_active` está `false`: um colaborador convidado hoje nasce **sem**
+  2FA, então o primeiro login dele não pede WhatsApp nenhum. A forma mais simples e mais segura de
+  cumprir o FR08 não é construir um desafio paralelo pro convite — é **ativar o 2FA na hora de
+  criar a conta**, chamando a função `two_factor_activate(user_id)` que o sistema de login já usa
+  e já testa em produção. Isso faz o primeiro login do convidado passar pelo `login-start`/
+  `login-verify` normais, exigindo WhatsApp do mesmo jeito que qualquer outra conta ativa.
+  `invite-user` passa a: (1) exigir celular cadastrado antes de permitir o convite (sem celular,
+  `two_factor_activate` deixaria a conta sem conseguir logar — `login-start` devolveria
+  `no_phone` pra sempre); (2) chamar `two_factor_activate` logo depois de criar o usuário.
 - **`send-recovery-email`** (existente): vira stub HTTP 410, igual a PR #49 propunha — só depois
   que o frontend novo estiver no ar (ver ordem de publicação).
+- **`auth-email-hook`** (novo, `verify_jwt: false`, autenticado por assinatura própria do GoTrue —
+  não pelo JWT do Supabase): endpoint do Send Email Hook. Confere a assinatura com
+  `SEND_EMAIL_HOOK_SECRET`, grava o tipo de e-mail tentado em `auth_email_hook_log` e retorna
+  sucesso **sem enviar nada** — o e-mail nativo do GoTrue nunca chega a sair, venha de onde vier
+  (painel do Supabase ou uma chamada de API que o acione).
+
+### Send Email Hook — fecha o resíduo do painel do Supabase
+
+Confirmado no código atual: nem `invite-user` nem `send-recovery-email` dependem do envio nativo
+do Supabase hoje (os dois já usam o canal SMTP próprio) — então ligar o hook não quebra nada que
+já funciona. Ativação é manual no painel (Authentication → Hooks → Send Email → URL da função +
+secret), no mesmo passo 6 do rollout que liga o Custom Access Token Hook (ver "Risco e rollback").
 
 ## Banco
 
@@ -92,10 +114,11 @@ banco são só aditivas):
 3. Trocar o frontend para o fluxo novo.
 4. Validar manualmente em produção (checklist abaixo).
 5. Aposentar `send-recovery-email` (410) e remover o hash-handling antigo do `App.jsx`.
-6. Por último, ativar o Custom Access Token Hook e as RLS novas — são a mudança de maior alcance
-   (afeta o formato do JWT emitido para todo mundo, não só quem usa recuperação), então só depois
-   dos passos 1-5 estarem estáveis em produção, pra poder desligar só o hook e reverter rápido se
-   algo quebrar, sem precisar reverter o resto.
+6. Por último, ativar o Custom Access Token Hook, o Send Email Hook e as RLS novas — são a
+   mudança de maior alcance (afeta o formato do JWT emitido para todo mundo e desliga e-mails
+   nativos do Supabase pra sempre, não só pra quem usa recuperação), então só depois dos passos
+   1-5 estarem estáveis em produção, pra poder desligar só o hook problemático e reverter rápido
+   se algo quebrar, sem precisar reverter o resto.
 
 **Checklist de verificação manual obrigatório antes de considerar pronto** (não existe suíte
 automatizada que pegue regressão aqui — CLAUDE.md seção 3):

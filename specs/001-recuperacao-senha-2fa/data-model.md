@@ -2,15 +2,14 @@
 
 ## Tabela nova: `credential_challenges`
 
-Generaliza o desafio de dois fatores tanto para recuperação de senha (FR01-FR07) quanto para
-primeiro acesso por convite (FR08) — um `purpose` distingue os dois usos, evitando duplicar a
-mesma máquina de estado em duas tabelas.
+Desafio de dois fatores da recuperação de senha (FR01-FR07). O convite (FR08) **não** usa esta
+tabela — ver nota em `plan.md`: a forma mais simples de cumprir o FR08 é ativar o 2FA já existente
+na criação da conta (`two_factor_activate`), não duplicar a máquina de desafio aqui.
 
 | Coluna                | Tipo          | Observação |
 |------------------------|---------------|------------|
 | `id`                   | uuid pk       | |
 | `user_id`              | uuid          | referencia `profiles(id)` |
-| `purpose`              | text          | `'reset'` \| `'invite'` |
 | `email_code_hash`      | text          | hash do código de 6 dígitos enviado por e-mail |
 | `whatsapp_code_hash`   | text          | hash do código de 6 dígitos enviado por WhatsApp |
 | `email_confirmed_at`   | timestamptz   | null até confirmar |
@@ -62,4 +61,21 @@ seção 11 do CLAUDE.md), não resolvido silenciosamente nem ignorado.
 
 Função Postgres que embute `pwd_changed_at` (epoch) como claim customizada em todo JWT novo
 emitido. Precisa ser ativada manualmente no painel do Supabase depois do deploy da migration —
-mesmo tipo de passo manual pós-deploy que o Send Email Hook da PR antiga já exigia.
+mesmo tipo de passo manual pós-deploy que o Send Email Hook abaixo também exige.
+
+## Tabela nova: `auth_email_hook_log`
+
+Registro de toda vez que o GoTrue (Supabase Auth) tentaria mandar um e-mail nativo (recuperação,
+convite, confirmação) — inclusive os disparados fora do app, direto pelo painel do Supabase.
+Existe só para auditoria/visibilidade; o e-mail nativo nunca chega a ser enviado de verdade
+(ver seção "Send Email Hook" do `plan.md`).
+
+| Coluna        | Tipo        | Observação |
+|---------------|-------------|------------|
+| `id`          | bigint pk   | |
+| `email_type`  | text        | tipo que o GoTrue tentou mandar (recovery, invite, signup, ...) |
+| `user_id`     | uuid        | se identificável no payload |
+| `created_at`  | timestamptz | |
+
+**RLS**: ligado, sem policy — só `service_role` (mesmo padrão das demais tabelas de auditoria
+sensível).
