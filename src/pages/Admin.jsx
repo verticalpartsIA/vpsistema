@@ -86,7 +86,7 @@ export default function Admin({ onBack }) {
 
   // Modal convite
   const [showInvite,    setShowInvite]    = useState(false)
-  const [invite,        setInvite]        = useState({ name: '', email: '', department: '', level: 'Colaborador', password: '', is_department_lead: false })
+  const [invite,        setInvite]        = useState({ name: '', email: '', celular: '', department: '', level: 'Colaborador', password: '', is_department_lead: false })
   const [inviting,      setInviting]      = useState(false)
   const [inviteMsg,     setInviteMsg]     = useState(null)
   const [showResend,    setShowResend]    = useState(false)  // e-mail já cadastrado → oferecer reenvio de credenciais
@@ -668,7 +668,7 @@ export default function Admin({ onBack }) {
   }
 
   function resetInviteModal() {
-    setInvite({ name: '', email: '', department: '', level: 'Colaborador', password: '', is_department_lead: false })
+    setInvite({ name: '', email: '', celular: '', department: '', level: 'Colaborador', password: '', is_department_lead: false })
     setAvatarFile(null)
     setShowResend(false)
     if (avatarPreview) { URL.revokeObjectURL(avatarPreview); setAvatarPreview(null) }
@@ -697,6 +697,7 @@ export default function Admin({ onBack }) {
       body: {
         email:      invite.email,
         name:       invite.name,
+        celular:    invite.celular,
         level:      invite.level,
         department: invite.department || null,
         is_department_lead: invite.is_department_lead,
@@ -2141,6 +2142,24 @@ export default function Admin({ onBack }) {
                   className="w-full bg-surface border border-surface-border text-white placeholder-slate-600
                              rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
                 />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                  Celular (WhatsApp)
+                </label>
+                <input
+                  type="tel"
+                  value={invite.celular}
+                  onChange={e => setInvite(p => ({ ...p, celular: e.target.value }))}
+                  placeholder="(11) 91234-5678"
+                  required
+                  className="w-full bg-surface border border-surface-border text-white placeholder-slate-600
+                             rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-brand transition-colors"
+                />
+                <p className="text-slate-500 text-xs mt-1">
+                  Obrigatório: o primeiro login do colaborador já exige um código enviado a este número.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">

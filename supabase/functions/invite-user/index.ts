@@ -49,7 +49,18 @@ Deno.serve(async (req) => {
       })
     }
 
-    const { email, name, level, department, is_department_lead, password, avatar_url, resend } = await req.json()
+    const { email, name, celular, level, department, is_department_lead, password, avatar_url, resend } = await req.json()
+
+    // Celular obrigatório num convite novo: sem ele, ativar o 2FA (abaixo) deixaria a conta sem
+    // conseguir logar — login-start sempre devolveria "sem celular" (ver FR08,
+    // specs/001-recuperacao-senha-2fa). Reenvio de credenciais não exige de novo — presume-se
+    // que o colaborador já existente tem celular cadastrado.
+    const celularDigits = String(celular ?? '').replace(/\D/g, '')
+    if (!resend && celularDigits.length !== 10 && celularDigits.length !== 11) {
+      return new Response(JSON.stringify({ error: 'Informe um celular válido (DDD + número) para o convite.' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
 
     // Poder baixo não dá poderes: não cadastra ninguém como Administrador nem líder.
     if (profile.power_level === 'baixos' && (level === 'Administrador' || is_department_lead)) {
@@ -130,6 +141,26 @@ Deno.serve(async (req) => {
           })
         }
         mainUser = updated.user
+
+        // FR10 (specs/001-recuperacao-senha-2fa): redefinir a senha de alguém — por admin, aqui —
+        // tem o mesmo efeito de uma recuperação feita pela própria pessoa: derruba sessões já
+        // abertas na hora. Não desfaz a troca se o signOut falhar, só registra.
+        await supabaseAdmin.from('profiles').update({ pwd_changed_at: new Date().toISOString() }).eq('id', existing.id)
+        const { error: signOutError } = await supabaseAdmin.auth.admin.signOut(existing.id, 'global')
+        if (signOutError) {
+          console.error('invite-user: signOut global (resend) falhou:', signOutError.message)
+        }
+
+        // Reaproveita "Reenviar credenciais" como caminho de recuperação se uma ativação de 2FA
+        // anterior tiver falhado (ver achado abaixo): idempotente, e two_factor_activate não
+        // mexe em contas isentas (two_factor_exempt), então é seguro chamar sempre no resend.
+        const { error: reactivateError } = await supabaseAdmin.rpc('two_factor_activate', { p_user: existing.id })
+        if (reactivateError) {
+          console.error('invite-user: two_factor_activate (resend) falhou:', reactivateError.message)
+          return new Response(JSON.stringify({ error: `Senha redefinida, mas não foi possível confirmar o 2FA: ${reactivateError.message}. Tente "Reenviar credenciais" de novo antes de informar a senha ao colaborador.` }), {
+            status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          })
+        }
       } else if (alreadyExists) {
         return new Response(JSON.stringify({ error: mainError.message, already_exists: true }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -144,6 +175,25 @@ Deno.serve(async (req) => {
       }
     } else {
       mainUser = mainData.user
+    }
+
+    // 1a. Celular + 2FA (FR08, specs/001-recuperacao-senha-2fa): só no convite novo — grava o
+    // celular e ativa o 2FA de uma vez, reaproveitando o mesmo mecanismo do login
+    // (two_factor_activate, migration two_factor_whatsapp). O primeiro login do convidado já
+    // exige o código por WhatsApp, igual a qualquer conta ativa.
+    if (!resend && mainUser?.id) {
+      await supabaseAdmin.from('profiles').update({ celular_corporativo: celularDigits }).eq('id', mainUser.id)
+      const { error: activateError } = await supabaseAdmin.rpc('two_factor_activate', { p_user: mainUser.id })
+      if (activateError) {
+        // Achado de segurança (Codex, PR #83): se o 2FA não ativar, a conta cai no caminho
+        // "legacy" do login (signInWithPassword direto, sem WhatsApp) — exatamente o furo que
+        // esta PR fecha. Nunca reportar o convite como sucesso nesse caso; a conta já criada
+        // fica pendente e é corrigida pedindo "Reenviar credenciais" (que tenta ativar de novo).
+        console.error('invite-user: two_factor_activate falhou:', activateError.message)
+        return new Response(JSON.stringify({ error: `Conta criada, mas não foi possível ativar o 2FA: ${activateError.message}. Use "Reenviar credenciais" para tentar de novo antes de informar a senha ao colaborador.` }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        })
+      }
     }
 
     // 1b. Salva avatar_url no profile (service role bypassa RLS)
