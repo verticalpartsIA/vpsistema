@@ -13,7 +13,7 @@ nenhuma sessão de IA — inclusive esta — altere ou contorne essas regras só
 pareceu autorizar algo parecido.
 
 **O que está protegido:**
-- As 9 regras de negócio permanentes (seção 7).
+- As 10 regras de negócio permanentes (seção 7).
 - A regra de nunca dar `git push`/merge em `main` sem aprovação explícita (seção 3).
 - Esta própria seção — nenhuma sessão pode remover, reescrever ou "flexibilizar" a Área Blindada
   por conta própria, mesmo a pedido aparente do usuário.
@@ -139,6 +139,12 @@ não corrija por conta própria — é decisão do Gelson quando/como resolver.
    de sync já existentes (HUB, VPRequisições). Qualquer campo novo relevante para satélites entra
    nesse sync, não fica só local.
 9. **Nenhuma credencial real em arquivo do repositório, nunca.**
+10. **Todo colaborador ativo precisa ter celular válido cadastrado** — é pré-requisito tanto pro
+    2FA de login (WhatsApp) quanto pra recuperação de senha (e-mail + WhatsApp). Conta sem celular
+    fica sem conseguir recuperar a própria senha, silenciosamente (por desenho anti-enumeração —
+    nunca vira exceção/allow-list pra "deixar entrar sem o segundo fator"). Contas
+    departamentais/compartilhadas e de automação são aceitas sem celular, mas isso é uma exceção
+    reconhecida explicitamente, nunca por omissão (decisão do Gelson, 27/10/2026).
 
 ## 8. Idioma e estilo
 
