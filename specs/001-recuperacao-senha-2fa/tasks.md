@@ -3,14 +3,24 @@
 Fase 4 (sincronização com satélites) não se aplica — `plan.md` registra impacto zero (decisão
 `/clarify` P4).
 
-## Status (26/10/2026)
+## Status (27/10/2026)
 
-Código de T001-T015 escrito e commitado (migration, 6 edge functions, `Login.jsx`/`App.jsx`/
-`Admin.jsx`). `npm run build` passa; os 5 testes novos de `auth-email-hook-core` passam, junto
-com os 16 testes já existentes do repo (21 no total). **Nada foi aplicado em produção** — nem a
-migration, nem o deploy das edge functions, nem a ativação dos hooks no painel. T016 (checklist
-de verificação manual) só pode rodar depois do deploy real, com o Gelson — não é algo que esta
-sessão consiga validar sozinha. Ordem de publicação: ver seção "Risco e rollback" do `plan.md`.
+Migration aplicada em produção, as 5 edge functions novas publicadas, os dois hooks (Send Email
+e Custom Access Token) ativados no painel, e o T016 (checklist de verificação manual) concluído
+com o Gelson — ver detalhe por item logo abaixo. Durante o T016 foi encontrado e corrigido um gap
+real: `invite-user` (celular obrigatório + ativação automática do 2FA no convite, T010/T010b)
+estava commitada desde a PR #83 mas **nunca tinha sido publicada como edge function** — só o
+deploy do frontend (Hostinger) acontece automaticamente no push pra `main`; edge functions
+precisam de publicação própria, que tinha ficado pra trás. Publicada em 27/10/2026.
+
+Decisão registrada do Gelson (27/10/2026): recuperação de senha sem celular cadastrado
+permanece bloqueada por desenho — não vira exceção. As contas ativas sem celular hoje
+(departamentais + a conta de automação) ficam assim até precisarem de acesso de verdade, aí se
+cadastra o celular na hora.
+
+Artefatos órfãos da PR #49 antiga (function `reset-confirm`, function SQL
+`password_reset_confirm`, tabela `password_reset_challenges`) removidos em 27/10/2026
+(migration `20261027130000_limpa_artefatos_orfaos_pr49`).
 
 ## Fase 1 — Schema/Migração
 
@@ -129,15 +139,20 @@ sessão consiga validar sozinha. Ordem de publicação: ver seção "Risco e rol
   fora do runtime Deno (mesmo padrão de `eventos-ingest-core.ts`).
   *Verificação*: `node --experimental-strip-types --test
   supabase/functions/_shared/__tests__/credential-challenges-core.test.mjs` passa.
-- **T016**: Checklist de verificação manual completo em produção (ou ambiente equivalente) antes
-  de considerar a feature pronta — repetir aqui o checklist do `plan.md`:
-  - [ ] Login normal com 2FA sem regressão.
-  - [ ] Recuperação ponta a ponta com celular cadastrado.
-  - [ ] Recuperação de conta sem celular: nenhum código enviado, mensagem genérica.
+- **T016**: Checklist de verificação manual completo em produção — concluído em 27/10/2026:
+  - [x] Login normal com 2FA sem regressão.
+  - [x] Recuperação ponta a ponta com celular cadastrado (confirmado com o Mauricio Araujo, caso
+    real — primeira tentativa falhou por e-mail digitado errado, segunda funcionou).
+  - [x] Recuperação de conta sem celular: nenhum código enviado, mensagem genérica (confirmado
+    tanto com conta de teste quanto com o e-mail errado do Mauricio).
   - [ ] Convite ponta a ponta com celular cadastrado: primeiro login do convidado já pede o
-    código de WhatsApp (2FA ativo desde a criação).
-  - [ ] Convite barrado para quem não tem celular.
-  - [ ] Sessão aberta em outro dispositivo cai de fato após reset (próprio usuário e via admin).
-  - [ ] Ativação do hook/RLS (passo 6 do rollout) não desloga ninguém só pelo deploy.
-  - [ ] Depois de ativar o Send Email Hook: "Send recovery email" pelo painel do Supabase não
+    código de WhatsApp (2FA ativo desde a criação) — **adiado**: decisão do Gelson de não criar
+    um convite artificial só pra testar; roda na próxima contratação real.
+  - [x] Convite barrado para quem não tem celular (achado o gap de deploy da `invite-user`
+    nesse teste — corrigido e reconfirmado).
+  - [x] Sessão aberta em outro dispositivo cai de fato após reset — via "Reenviar credenciais"
+    pelo admin confirmado (sessão antiga passa a falhar); fluxo do próprio usuário já é coberto
+    pelo `reset-complete` (código lido e testado, chama `signOut` global).
+  - [x] Ativação do hook/RLS (passo 6 do rollout) não desloga ninguém só pelo deploy.
+  - [x] Depois de ativar o Send Email Hook: "Send recovery email" pelo painel do Supabase não
     entrega nada, e fica registrado em `auth_email_hook_log`.
