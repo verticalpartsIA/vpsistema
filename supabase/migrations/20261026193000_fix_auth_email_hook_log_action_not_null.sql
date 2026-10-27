@@ -7,4 +7,17 @@
 --
 -- `action` fica órfã e nullable — sem uso pelo código novo, mas sem motivo pra apagar agora
 -- (limpeza futura junto com reset-confirm/password_reset_challenges).
-alter table public.auth_email_hook_log alter column action drop not null;
+--
+-- Condicional ao DROP NOT NULL (achado do Codex, PR #84): a coluna `action` só existe porque a
+-- tabela já estava em produção com esse schema antes desta migration (artefato órfão). Rodando
+-- as migrations do zero num banco novo, 20261026180000 cria auth_email_hook_log sem `action`
+-- nenhuma — `alter column action` incondicional quebraria a cadeia de migrations nesse caso.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'auth_email_hook_log' and column_name = 'action'
+  ) then
+    alter table public.auth_email_hook_log alter column action drop not null;
+  end if;
+end $$;
